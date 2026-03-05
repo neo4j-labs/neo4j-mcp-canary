@@ -16,7 +16,7 @@ Please read and follow these guidelines to ensure a welcoming environment for ev
 ## Clone the repository (forks are currently disabled)
 
 ```bash
-git clone git@github.com:neo4j/mcp.git && cd mcp
+gh repo clone neo4j-labs/neo4j-mcp-canary && cd neo4j-mcp-canary
 ```
 
 ## Install Dependencies
