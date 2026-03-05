@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const eventNamePrefix = "MCP4NEO4JCANARY"
+const eventNamePrefix = "MCP-NEO4J-CANARY"
 
 // baseProperties are the base properties attached to a MixPanel "track" event.
 // DistinctID is a distinct ID used to identify unique users, we do not use this information, therefore for us it will be distinct different executions.
