@@ -1,0 +1,39 @@
+// Copyright (c) "Neo4j"
+// Neo4j Sweden AB [http://neo4j.com]
+
+//go:build e2e
+
+package e2e
+
+import (
+	"context"
+	"log"
+	"os"
+	"testing"
+
+	"github.com/neo4j-labs/neo4j-mcp-canary/test/dbservice"
+	"github.com/neo4j-labs/neo4j-mcp-canary/test/e2e/helpers"
+)
+
+var dbs = dbservice.NewDBService()
+var server string = ""
+
+func TestMain(m *testing.M) {
+	ctx := context.Background()
+
+	srv, cleanUpServerDir, err := helpers.BuildServer()
+	server = srv
+
+	if err != nil {
+		log.Fatal("error while creating MCP server for e2e purpose")
+	}
+	dbs.Start(ctx)
+
+	code := m.Run()
+
+	dbs.Stop(ctx)
+
+	cleanUpServerDir()
+
+	os.Exit(code)
+}
