@@ -24,7 +24,7 @@ builds:
       - goos: windows
         goarch: arm64
     ldflags:
-      - -X "main.Version={{.Env.GORELEASER_CURRENT_TAG}}"
+      - -X "main.Version={{.Tag}}"
 
 archives:
   - id: default
