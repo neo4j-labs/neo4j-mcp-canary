@@ -1,4 +1,4 @@
-module github.com/neo4j/mcp
+module github.com/neo4j-labs/neo4j-mcp-canary
 
 go 1.25.3
 
