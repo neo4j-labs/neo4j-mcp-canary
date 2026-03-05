@@ -1,15 +1,13 @@
 {
   "manifest_version": "0.3",
   "name": "neo4j-mcp",
-  "version": "1.0.0",
-  "description": "Official Model Context Protocol (MCP) server for Neo4j.",
+  "version": "0.1.1",
+  "description": "Canary Model Context Protocol (MCP) server for Neo4j.",
   "author": {
     "name": "Neo4j",
     "url": "https://neo4j.com/"
   },
-  "homepage": "https://github.com/neo4j/mcp",
-  "documentation": "https://neo4j.com/docs/mcp/",
-  "support": "https://github.com/neo4j-labs/neo4j-mcp-canary/issues",
+  "homepage": "https://github.com/neo4j-labs/neo4j-mcp-canary",
   "user_config": {
     "NEO4J_URI": {
       "type": "string",
