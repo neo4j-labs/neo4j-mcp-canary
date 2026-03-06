@@ -54,3 +54,10 @@ changelog:
       - '^chore:'
       - Merge pull request
       - Merge branch
+
+dockers_v2:
+  - images:
+    - "ghcr.io/{{ .Env.GITHUB_ORG }}/{{ .Env.GITHUB_REPO }}"
+    tags:
+      - "{{.Version}}"
+      - "{{ if not .IsNightly }}latest{{ end }}"
