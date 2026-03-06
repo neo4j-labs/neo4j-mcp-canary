@@ -129,7 +129,6 @@ func (a *Analytics) getBaseProperties() baseProperties {
 	uptime := time.Now().Unix() - a.cfg.startupTime
 	insertID := a.newInsertID()
 	return baseProperties{
-		Token:      a.cfg.token,
 		DistinctID: a.cfg.distinctID,
 		Time:       time.Now().UnixMilli(),
 		InsertID:   insertID,
