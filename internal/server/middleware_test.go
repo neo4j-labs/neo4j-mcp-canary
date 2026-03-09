@@ -96,7 +96,7 @@ func bearerTokenCheckHandler(t *testing.T, expectToken bool, expectedToken strin
 }
 
 func TestAuthMiddleware_WithValidBasicCredentials(t *testing.T) {
-	handler := authMiddleware("Authorization", nil)(authCheckHandler(t, true, "testuser", "testpass"))
+	handler := authMiddleware("Authorization", nil, nil)(authCheckHandler(t, true, "testuser", "testpass"))
 
 	req := httptest.NewRequest("GET", "/", nil)
 	req.SetBasicAuth("testuser", "testpass")
@@ -110,7 +110,7 @@ func TestAuthMiddleware_WithValidBasicCredentials(t *testing.T) {
 }
 
 func TestAuthMiddleware_WithoutCredentials(t *testing.T) {
-	handler := authMiddleware("Authorization", nil)(mockHandler())
+	handler := authMiddleware("Authorization", nil, nil)(mockHandler())
 
 	req := httptest.NewRequest("GET", "/", nil)
 	rec := httptest.NewRecorder()
@@ -141,7 +141,7 @@ func TestAuthMiddleware_WithEmptyBasicCredentials(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			handler := authMiddleware("Authorization", nil)(mockHandler())
+			handler := authMiddleware("Authorization", nil, nil)(mockHandler())
 
 			req := httptest.NewRequest("GET", "/", nil)
 			req.SetBasicAuth(tc.username, tc.password)
@@ -163,7 +163,7 @@ func TestAuthMiddleware_WithEmptyBasicCredentials(t *testing.T) {
 }
 
 func TestAuthMiddleware_WithValidBearerToken(t *testing.T) {
-	handler := authMiddleware("Authorization", nil)(bearerTokenCheckHandler(t, true, "test-token-123"))
+	handler := authMiddleware("Authorization", nil, nil)(bearerTokenCheckHandler(t, true, "test-token-123"))
 
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Authorization", "Bearer test-token-123")
@@ -177,7 +177,7 @@ func TestAuthMiddleware_WithValidBearerToken(t *testing.T) {
 }
 
 func TestAuthMiddleware_WithBearerTokenAndExtraSpaces(t *testing.T) {
-	handler := authMiddleware("Authorization", nil)(bearerTokenCheckHandler(t, true, "test-token-456"))
+	handler := authMiddleware("Authorization", nil, nil)(bearerTokenCheckHandler(t, true, "test-token-456"))
 
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Authorization", "Bearer   test-token-456  ")
@@ -191,7 +191,7 @@ func TestAuthMiddleware_WithBearerTokenAndExtraSpaces(t *testing.T) {
 }
 
 func TestAuthMiddleware_WithEmptyBearerToken(t *testing.T) {
-	handler := authMiddleware("Authorization", nil)(mockHandler())
+	handler := authMiddleware("Authorization", nil, nil)(mockHandler())
 
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Authorization", "Bearer ")
@@ -210,7 +210,7 @@ func TestAuthMiddleware_WithEmptyBearerToken(t *testing.T) {
 
 func TestAuthMiddleware_FallbackToBasicAuth(t *testing.T) {
 	// When no bearer token, should fall back to basic auth
-	handler := authMiddleware("Authorization", nil)(authCheckHandler(t, true, "testuser", "testpass"))
+	handler := authMiddleware("Authorization", nil, nil)(authCheckHandler(t, true, "testuser", "testpass"))
 
 	req := httptest.NewRequest("GET", "/", nil)
 	req.SetBasicAuth("testuser", "testpass")
@@ -622,6 +622,11 @@ func TestAuthMiddleware_AllowsUnauthenticatedPing(t *testing.T) {
 	// Build middleware chain with no allowed origins and a simple handler
 	mockServer := mockNeo4jMCPServer(t)
 	mockServer.config.AllowUnauthenticatedPing = true
+
+	mockAnalytics := mockServer.anService.(*analytics_mocks.MockService)
+	mockAnalytics.EXPECT().NewUnauthenticatedJsonRpcEvent("ping").Times(1)
+	mockAnalytics.EXPECT().EmitEvent(gomock.Any()).Times(1)
+
 	callback := mockServer.chainMiddleware([]string{}, mockHandler())
 
 	// Create a POST request to /mcp with JSON-RPC ping body and no auth header
@@ -654,7 +659,7 @@ func TestAuthMiddleware_BlocksUnauthenticatedPingWhenDisabled(t *testing.T) {
 }
 
 func TestAuthMiddleware_InvalidBasicAuthHeader(t *testing.T) {
-	handler := authMiddleware("Authorization", nil)(mockHandler())
+	handler := authMiddleware("Authorization", nil, nil)(mockHandler())
 
 	req := httptest.NewRequest("GET", "/", nil)
 	// Invalid basic auth header
@@ -678,6 +683,10 @@ func TestAuthMiddleware_AllowsUnauthenticatedToolsList(t *testing.T) {
 	mockServer := mockNeo4jMCPServer(t)
 	mockServer.config.AllowUnauthenticatedToolsList = true
 	handler := mockServer.chainMiddleware([]string{}, mockHandler())
+
+	mockAnalytics := mockServer.anService.(*analytics_mocks.MockService)
+	mockAnalytics.EXPECT().NewUnauthenticatedJsonRpcEvent("tools/list").Times(1)
+	mockAnalytics.EXPECT().EmitEvent(gomock.Any()).Times(1)
 
 	body := `{"jsonrpc":"2.0","method":"tools/list","params":null,"id":1}`
 	req := httptest.NewRequest("POST", "/mcp", bytes.NewBufferString(body))
@@ -731,5 +740,53 @@ func TestAuthMiddleware_RejectsTooLargeUnauthenticatedPing(t *testing.T) {
 
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("Expected status 413 Payload Too Large for oversized unauthenticated ping, got %d", rec.Code)
+	}
+}
+
+func TestAuthMiddleware_AllowsUnauthenticatedInitialize(t *testing.T) {
+	// Build middleware chain with no allowed origins and a simple handler
+	mockServer := mockNeo4jMCPServer(t)
+	mockServer.config.AllowUnauthenticatedInitialize = true
+
+	mockAnalytics := mockServer.anService.(*analytics_mocks.MockService)
+	mockAnalytics.EXPECT().NewUnauthenticatedJsonRpcEvent("initialize").Times(1)
+	mockAnalytics.EXPECT().EmitEvent(gomock.Any()).Times(1)
+
+	callback := mockServer.chainMiddleware([]string{}, mockHandler())
+
+	// Create a POST request to /mcp with JSON-RPC ping body and no auth header
+	body := `{"jsonrpc":"2.0","method":"initialize","params":null,"id":1}`
+	req := httptest.NewRequest("POST", "/mcp", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	callback.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for unauthenticated initialize, got %d", rec.Code)
+	}
+}
+
+func TestAuthMiddleware_AllowsUnauthenticatedNotificationsInitialize(t *testing.T) {
+	// Build middleware chain with no allowed origins and a simple handler
+	mockServer := mockNeo4jMCPServer(t)
+	mockServer.config.AllowUnauthenticatedNotificationsInitialize = true
+
+	mockAnalytics := mockServer.anService.(*analytics_mocks.MockService)
+	mockAnalytics.EXPECT().NewUnauthenticatedJsonRpcEvent("notifications/initialized").Times(1)
+	mockAnalytics.EXPECT().EmitEvent(gomock.Any()).Times(1)
+
+	callback := mockServer.chainMiddleware([]string{}, mockHandler())
+
+	// Create a POST request to /mcp with JSON-RPC ping body and no auth header
+	body := `{"jsonrpc":"2.0","method":"notifications/initialized"}`
+	req := httptest.NewRequest("POST", "/mcp", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	callback.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for unauthenticated initialize, got %d", rec.Code)
 	}
 }

@@ -16,7 +16,6 @@ import (
 
 	analytics "github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics"
 	config "github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
-
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -376,6 +375,44 @@ func (c *MockServiceNewToolEventCall) Do(f func(string, bool) analytics.TrackEve
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockServiceNewToolEventCall) DoAndReturn(f func(string, bool) analytics.TrackEvent) *MockServiceNewToolEventCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// NewUnauthenticatedJsonRpcEvent mocks base method.
+func (m *MockService) NewUnauthenticatedJsonRpcEvent(jsonRpcRequest string) analytics.TrackEvent {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NewUnauthenticatedJsonRpcEvent", jsonRpcRequest)
+	ret0, _ := ret[0].(analytics.TrackEvent)
+	return ret0
+}
+
+// NewUnauthenticatedJsonRpcEvent indicates an expected call of NewUnauthenticatedJsonRpcEvent.
+func (mr *MockServiceMockRecorder) NewUnauthenticatedJsonRpcEvent(jsonRpcRequest any) *MockServiceNewUnauthenticatedJsonRpcEventCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewUnauthenticatedJsonRpcEvent", reflect.TypeOf((*MockService)(nil).NewUnauthenticatedJsonRpcEvent), jsonRpcRequest)
+	return &MockServiceNewUnauthenticatedJsonRpcEventCall{Call: call}
+}
+
+// MockServiceNewUnauthenticatedJsonRpcEventCall wrap *gomock.Call
+type MockServiceNewUnauthenticatedJsonRpcEventCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockServiceNewUnauthenticatedJsonRpcEventCall) Return(arg0 analytics.TrackEvent) *MockServiceNewUnauthenticatedJsonRpcEventCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockServiceNewUnauthenticatedJsonRpcEventCall) Do(f func(string) analytics.TrackEvent) *MockServiceNewUnauthenticatedJsonRpcEventCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockServiceNewUnauthenticatedJsonRpcEventCall) DoAndReturn(f func(string) analytics.TrackEvent) *MockServiceNewUnauthenticatedJsonRpcEventCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

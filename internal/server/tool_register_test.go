@@ -12,7 +12,6 @@ import (
 	db "github.com/neo4j-labs/neo4j-mcp-canary/internal/database/mocks"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/server"
 
-	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"go.uber.org/mock/gomock"
 )
 
@@ -43,7 +42,6 @@ func TestToolRegister(t *testing.T) {
 		// Current tools: get-schema, read-cypher, write-cypher, list-gds-procedures
 		expectedTotalToolsCount := 4
 
-		// Start server and register tools
 		err := s.Start()
 		if err != nil {
 			t.Fatalf("Start() failed: %v", err)
@@ -73,7 +71,6 @@ func TestToolRegister(t *testing.T) {
 		// Readonly tools: get-schema, read-cypher, list-gds-procedures
 		expectedTotalToolsCount := 3
 
-		// Start server and register tools
 		err := s.Start()
 		if err != nil {
 			t.Fatalf("Start() failed: %v", err)
@@ -84,7 +81,8 @@ func TestToolRegister(t *testing.T) {
 			t.Errorf("Expected %d tools, but test configuration shows %d", expectedTotalToolsCount, registeredTools)
 		}
 	})
-	t.Run("should register also not write tools when readonly is set to false", func(t *testing.T) {
+
+	t.Run("should register also write tools when readonly is set to false", func(t *testing.T) {
 		mockDB := getMockedDBService(ctrl, true)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
 		cfg := &config.Config{
@@ -102,7 +100,6 @@ func TestToolRegister(t *testing.T) {
 		// All tools: get-schema, read-cypher, write-cypher, list-gds-procedures
 		expectedTotalToolsCount := 4
 
-		// Start server and register tools
 		err := s.Start()
 		if err != nil {
 			t.Fatalf("Start() failed: %v", err)
@@ -132,7 +129,6 @@ func TestToolRegister(t *testing.T) {
 		// Non-GDS tools: get-schema, read-cypher, write-cypher
 		expectedTotalToolsCount := 3
 
-		// Start server and register tools
 		err := s.Start()
 		if err != nil {
 			t.Fatalf("Start() failed: %v", err)
@@ -145,40 +141,17 @@ func TestToolRegister(t *testing.T) {
 	})
 }
 
-// utility to mock the invocation required by VerifyRequirements
+// getMockedDBService returns a mock DB service with the standard verifyRequirements expectations set up.
 func getMockedDBService(ctrl *gomock.Controller, withGDS bool) *db.MockService {
 	mockDB := db.NewMockService(ctrl)
 	mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
-	mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "RETURN 1 as first", gomock.Any()).Times(1).Return([]*neo4j.Record{
-		{
-			Keys: []string{"first"},
-			Values: []any{
-				int64(1),
-			},
-		},
-	}, nil)
-	checkApocMetaSchemaQuery := "SHOW PROCEDURES YIELD name WHERE name = 'apoc.meta.schema' RETURN count(name) > 0 AS apocMetaSchemaAvailable"
-	mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), checkApocMetaSchemaQuery, gomock.Any()).Times(1).Return([]*neo4j.Record{
-		{
-			Keys: []string{"apocMetaSchemaAvailable"},
-			Values: []any{
-				bool(true),
-			},
-		},
-	}, nil)
-	gdsVersionQuery := "RETURN gds.version() as gdsVersion"
+	mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), checkApocMetaSchemaQuery, gomock.Any()).Times(1).Return(apocAvailableRecord(true), nil)
+
 	if withGDS {
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return([]*neo4j.Record{
-			{
-				Keys: []string{"gdsVersion"},
-				Values: []any{
-					string("2.22.0"),
-				},
-			},
-		}, nil)
-		return mockDB
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(gdsVersionRecord("2.22.0"), nil)
+	} else {
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(nil, fmt.Errorf("Unknown function 'gds.version'"))
 	}
-	mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(nil, fmt.Errorf("Unknown function 'gds.version'"))
 
 	return mockDB
 }
