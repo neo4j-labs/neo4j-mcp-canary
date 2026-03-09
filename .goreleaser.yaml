@@ -5,6 +5,7 @@ project_name: neo4j-mcp-canary
 before:
   hooks:
     - go mod tidy
+    - go test -count=1 ./...
 
 builds:
   - id: neo4j-mcp
