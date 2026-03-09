@@ -1,10 +1,20 @@
-# Neo4j MCP Canary
+# Neo4j MCP Canary - _The canary goes first so the rest of us know what's coming_
 
-Neo4j MCP Canary is hosted in Neo4j labs as, although it is based on the Official Model Context Protocol (MCP) server for Neo4j, this variant is here for exploriing potential new capabilities with experimentations.  
+Neo4j MCP Canary is a fast-moving, experimental release of Neo4j MCP server for customers who want to explore emerging capabilities before they are considered for the official server.
 
-> Neo4j MCP Canary is _mostly_ compatibility with the command line arguements and environmental variables used by the Official Model Context Protocol (MCP) server but do not make assumptions and always check.  
+Built off the source code ofthe Official Model Context Protocol (MCP) server for Neo4j, this variant is here for exploriing potential new capabilities with experimentations.  
 
-You are welcome to contribute - we are always open to new ideas , even more so with the Canary version.   
+As it is a labs project, be aware that 
+
+- It is not supported 
+- Could contain breaking changes between its own releases and with the Official MCP server for Neo4j
+- Should be tested before using
+
+You are welcome to contribute - we are always open to new ideas , even more so with this Canary version.   
+
+> Neo4j MCP Canary Do not make assumptions that it will work for your situation.  Test first
+
+
 
 ## Prerequisites
 
