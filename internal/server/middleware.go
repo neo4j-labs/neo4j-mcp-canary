@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/auth"
 )
 
@@ -52,7 +53,7 @@ func (s *Neo4jMCPServer) chainMiddleware(allowedOrigins []string, next http.Hand
 		unauthMethods = append(unauthMethods, "notifications/initialized")
 	}
 
-	handler = authMiddleware(s.config.AuthHeaderName, unauthMethods)(handler)
+	handler = authMiddleware(s.config.AuthHeaderName, unauthMethods, s.anService)(handler)
 
 	// Add CORS middleware (if configured) - includes Mcp-Session-Id in allowed headers
 	handler = corsMiddleware(allowedOrigins, s.config.AuthHeaderName)(handler)
@@ -70,7 +71,7 @@ func (s *Neo4jMCPServer) chainMiddleware(allowedOrigins []string, next http.Hand
 // unauthenticatedMethods is an optional list of JSON-RPC method names (e.g. "ping", "tools/list")
 // that are permitted without credentials.
 // Returns 401 Unauthorized if credentials are missing or malformed.
-func authMiddleware(headerName string, unauthenticatedMethods []string) func(http.Handler) http.Handler {
+func authMiddleware(headerName string, unauthenticatedMethods []string, as analytics.Service) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
@@ -117,6 +118,8 @@ func authMiddleware(headerName string, unauthenticatedMethods []string) func(htt
 							continue
 						}
 						if ok {
+							slog.Info("Unauthenticated method", "method", method)
+							as.EmitEvent(as.NewUnauthenticatedJsonRpcEvent(method))
 							next.ServeHTTP(w, r)
 							return
 						}

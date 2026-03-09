@@ -58,7 +58,7 @@ func TestAnalytics(t *testing.T) {
 			},
 		}
 
-		mockClient.EXPECT().Post("http://localhost/track", gomock.Any(), gomock.Any()).
+		mockClient.EXPECT().Post("http://localhost/track?verbose=1", gomock.Any(), gomock.Any()).
 			DoAndReturn(func(_, _ string, body io.Reader) (*http.Response, error) {
 				bodyBytes, err := io.ReadAll(body)
 				if err != nil {
@@ -107,7 +107,7 @@ func TestAnalytics(t *testing.T) {
 			},
 		}
 
-		mockClient.EXPECT().Post("http://localhost/track", gomock.Any(), gomock.Any()).
+		mockClient.EXPECT().Post("http://localhost/track?verbose=1", gomock.Any(), gomock.Any()).
 			DoAndReturn(func(_, _ string, body io.Reader) (*http.Response, error) {
 				bodyBytes, err := io.ReadAll(body)
 				if err != nil {
@@ -154,17 +154,17 @@ func TestAnalytics(t *testing.T) {
 			{
 				name:             "endpoint with trailing slash",
 				mixpanelEndpoint: "http://localhost/",
-				expectedURL:      "http://localhost/track",
+				expectedURL:      "http://localhost/track?verbose=1",
 			},
 			{
 				name:             "endpoint without trailing slash",
 				mixpanelEndpoint: "http://localhost",
-				expectedURL:      "http://localhost/track",
+				expectedURL:      "http://localhost/track?verbose=1",
 			},
 			{
 				name:             "endpoint with multiple trailing slashes",
 				mixpanelEndpoint: "http://localhost//",
-				expectedURL:      "http://localhost/track",
+				expectedURL:      "http://localhost/track?verbose=1",
 			},
 		}
 
@@ -190,24 +190,24 @@ func TestEventCreation(t *testing.T) {
 
 	t.Run("NewGDSProjCreatedEvent", func(t *testing.T) {
 		event := analyticsService.NewGDSProjCreatedEvent()
-		if event.Event != "MCP4NEO4J_GDS_PROJ_CREATED" {
-			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP4NEO4J_GDS_PROJ_CREATED")
+		if event.Event != "MCP-NEO4J-CANARY_GDS_PROJ_CREATED" {
+			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP-NEO4J-CANARY_GDS_PROJ_CREATED")
 		}
 		assertBaseProperties(t, event.Properties)
 	})
 
 	t.Run("NewGDSProjDropEvent", func(t *testing.T) {
 		event := analyticsService.NewGDSProjDropEvent()
-		if event.Event != "MCP4NEO4J_GDS_PROJ_DROP" {
-			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP4NEO4J_GDS_PROJ_DROP")
+		if event.Event != "MCP-NEO4J-CANARY_GDS_PROJ_DROP" {
+			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP-NEO4J-CANARY_GDS_PROJ_DROP")
 		}
 		assertBaseProperties(t, event.Properties)
 	})
 
 	t.Run("NewToolEvent", func(t *testing.T) {
 		event := analyticsService.NewToolEvent("gds", true)
-		if event.Event != "MCP4NEO4J_TOOL_USED" {
-			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP4NEO4J_TOOL_USED")
+		if event.Event != "MCP-NEO4J-CANARY_TOOL_USED" {
+			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP-NEO4J-CANARY_TOOL_USED")
 		}
 		props := assertBaseProperties(t, event.Properties)
 		if props["tools_used"] != "gds" {
@@ -221,8 +221,8 @@ func TestEventCreation(t *testing.T) {
 
 	t.Run("NewStartupEvent", func(t *testing.T) {
 		event := analyticsService.NewStartupEvent(config.TransportModeStdio, false, "1.0.0")
-		if event.Event != "MCP4NEO4J_MCP_STARTUP" {
-			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP4NEO4J_MCP_STARTUP")
+		if event.Event != "MCP-NEO4J-CANARY_MCP_STARTUP" {
+			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP-NEO4J-CANARY_MCP_STARTUP")
 		}
 		props := assertBaseProperties(t, event.Properties)
 		if props["$os"] != runtime.GOOS {
@@ -248,8 +248,8 @@ func TestEventCreation(t *testing.T) {
 			CypherVersion: []string{"5", "25"},
 			Edition:       "enterprise",
 		})
-		if event.Event != "MCP4NEO4J_CONNECTION_INITIALIZED" {
-			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP4NEO4J_CONNECTION_INITIALIZED")
+		if event.Event != "MCP-NEO4J-CANARY_CONNECTION_INITIALIZED" {
+			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP-NEO4J-CANARY_CONNECTION_INITIALIZED")
 		}
 		props := assertBaseProperties(t, event.Properties)
 		if props["neo4j_version"] != "2025.09.01" {
@@ -272,8 +272,8 @@ func TestEventCreation(t *testing.T) {
 		auraAnalytics := newTestAnalytics(t, "test-token", "http://localhost", nil, "bolt://mydb.databases.neo4j.io")
 		event := auraAnalytics.NewStartupEvent(config.TransportModeHTTP, false, "1.0.0")
 
-		if event.Event != "MCP4NEO4J_MCP_STARTUP" {
-			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP4NEO4J_MCP_STARTUP")
+		if event.Event != "MCP-NEO4J-CANARY_MCP_STARTUP" {
+			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP-NEO4J-CANARY_MCP_STARTUP")
 		}
 		props := assertBaseProperties(t, event.Properties)
 		if props["$os"] != runtime.GOOS {
@@ -299,8 +299,8 @@ func TestEventCreation(t *testing.T) {
 		)
 		event := stdioAnalytics.NewStartupEvent(config.TransportModeStdio, false, "1.0.0")
 
-		if event.Event != "MCP4NEO4J_MCP_STARTUP" {
-			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP4NEO4J_MCP_STARTUP")
+		if event.Event != "MCP-NEO4J-CANARY_MCP_STARTUP" {
+			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP-NEO4J-CANARY_MCP_STARTUP")
 		}
 
 		props := assertBaseProperties(t, event.Properties)
@@ -325,8 +325,8 @@ func TestEventCreation(t *testing.T) {
 		)
 		event := httpAnalytics.NewStartupEvent(config.TransportModeHTTP, true, "1.0.0")
 
-		if event.Event != "MCP4NEO4J_MCP_STARTUP" {
-			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP4NEO4J_MCP_STARTUP")
+		if event.Event != "MCP-NEO4J-CANARY_MCP_STARTUP" {
+			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP-NEO4J-CANARY_MCP_STARTUP")
 		}
 
 		props := assertBaseProperties(t, event.Properties)
@@ -354,8 +354,8 @@ func TestEventCreation(t *testing.T) {
 		)
 		event := httpAnalytics.NewStartupEvent(config.TransportModeHTTP, false, "1.0.0")
 
-		if event.Event != "MCP4NEO4J_MCP_STARTUP" {
-			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP4NEO4J_MCP_STARTUP")
+		if event.Event != "MCP-NEO4J-CANARY_MCP_STARTUP" {
+			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP-NEO4J-CANARY_MCP_STARTUP")
 		}
 
 		props := assertBaseProperties(t, event.Properties)

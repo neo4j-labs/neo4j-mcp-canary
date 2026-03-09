@@ -3,8 +3,10 @@ module github.com/neo4j-labs/neo4j-mcp-canary
 go 1.25.3
 
 require (
+	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.43.2
+	github.com/mixpanel/mixpanel-go v1.2.1
 	github.com/neo4j/neo4j-go-driver/v6 v6.0.0
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.40.0
