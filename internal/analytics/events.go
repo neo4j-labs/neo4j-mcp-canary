@@ -28,6 +28,9 @@ type baseProperties struct {
 	OS         string `json:"$os"`
 	OSArch     string `json:"os_arch"`
 	IsAura     bool   `json:"isAura"`
+	IP         string `json:"$ip,omitempty"`
+	MachineID  string `json:"machine_id,omitempty"`
+	BinaryPath string `json:"binary_path,omitempty"`
 }
 
 // serverStartupProperties contains server-level information available at startup (no DB query required)
@@ -44,6 +47,12 @@ type connectionInitializedProperties struct {
 	Neo4jVersion  string   `json:"neo4j_version"`
 	Edition       string   `json:"edition"`
 	CypherVersion []string `json:"cypher_version"`
+}
+
+// unauthenticatedJsonRpcProperties contains the JsonRpc request
+type unauthenticatedJsonRpcProperties struct {
+	baseProperties
+	JsonRpcMethod string `json:"method"`
 }
 
 // toolProperties contains tool event properties (used for both STDIO and HTTP modes)
@@ -125,10 +134,24 @@ func (a *Analytics) NewToolEvent(toolsUsed string, success bool) TrackEvent {
 	}
 }
 
+// NewUnauthenticatedJsonRpcEvent creates events for unauthenticated JSONRPC requests e.g tools/list from MCP Clients
+// Only applies to HTTP(S) transport and is typically found where MCP Clients are checking the MCP Server is alive
+func (a *Analytics) NewUnauthenticatedJsonRpcEvent(jsonrpc string) TrackEvent {
+	slog.Info("NewUnauthenticatedJsonRpcEvent", "method", jsonrpc)
+	return TrackEvent{
+		Event: strings.Join([]string{eventNamePrefix, "UNAUTHENTICATED_JSONRPC"}, "_"),
+		Properties: unauthenticatedJsonRpcProperties{
+			baseProperties: a.getBaseProperties(),
+			JsonRpcMethod:  strings.ToUpper(jsonrpc),
+		},
+	}
+}
+
 func (a *Analytics) getBaseProperties() baseProperties {
 	uptime := time.Now().Unix() - a.cfg.startupTime
 	insertID := a.newInsertID()
 	return baseProperties{
+		Token:      a.cfg.token,
 		DistinctID: a.cfg.distinctID,
 		Time:       time.Now().UnixMilli(),
 		InsertID:   insertID,
@@ -136,6 +159,8 @@ func (a *Analytics) getBaseProperties() baseProperties {
 		OS:         runtime.GOOS,
 		OSArch:     runtime.GOARCH,
 		IsAura:     a.cfg.isAura,
+		MachineID:  a.cfg.machineID,
+		BinaryPath: a.cfg.binaryPath,
 	}
 }
 

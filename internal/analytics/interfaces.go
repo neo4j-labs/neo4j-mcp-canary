@@ -3,10 +3,19 @@
 
 package analytics
 
-//go:generate mockgen -destination=mocks/mock_analytics.go -package=analytics_mocks -typed github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics Service
+//go:generate mockgen -destination=mocks/mock_analytics.go -package=analytics_mocks -typed github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics Service,HTTPClient
+
 import (
+	"io"
+	"net/http"
+
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 )
+
+// HTTPClient is the subset of *http.Client used by Analytics, allowing injection of a mock in tests.
+type HTTPClient interface {
+	Post(url, contentType string, body io.Reader) (*http.Response, error)
+}
 
 type Service interface {
 	Disable()
@@ -18,4 +27,5 @@ type Service interface {
 	NewStartupEvent(transportMode config.TransportMode, tlsEnabled bool, mcpServer string) TrackEvent
 	NewConnectionInitializedEvent(connInfo ConnectionEventInfo) TrackEvent
 	NewToolEvent(toolsUsed string, success bool) TrackEvent
+	NewUnauthenticatedJsonRpcEvent(jsonRpcRequest string) TrackEvent
 }
