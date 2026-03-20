@@ -35,5 +35,12 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certifi
 # Run as non-root user (UID 65532 is a standard non-root user ID)
 USER 65532:65532
 
+# Environment configuration
+ENV NEO4J_MCP_HTTP_HOST=0.0.0.0 \
+    NEO4J_MCP_HTTP_PORT=8000 \
+    NEO4J_TRANSPORT_MODE=http
+
+EXPOSE 8000
+
 # Set entrypoint
 ENTRYPOINT ["/app/neo4j-mcp"]
