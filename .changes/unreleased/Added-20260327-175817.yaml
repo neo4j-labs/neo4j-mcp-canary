@@ -1,0 +1,3 @@
+kind: Added
+body: MixPanel events that include number of vector indexes and when vectors are used with read-cypher or write-cypher
+time: 2026-03-27T17:58:17.898248Z

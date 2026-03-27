@@ -55,12 +55,28 @@ type unauthenticatedJsonRpcProperties struct {
 	JsonRpcMethod string `json:"method"`
 }
 
+// ToolVectorInfo carries optional vector-related properties for tool events.
+// When nil, no vector properties are included in the event.
+type ToolVectorInfo struct {
+	// VectorIndexCount is the number of VECTOR indexes detected in the get-schema response.
+	VectorIndexCount *int `json:"vectorIndex,omitempty"`
+	// VectorSearch indicates whether the Cypher query uses vector index search
+	// (e.g. db.index.vector.queryNodes, db.index.vector.queryRelationships).
+	VectorSearch *bool `json:"vectorSearch,omitempty"`
+	// VectorPropertySet indicates whether the Cypher query sets vector properties
+	// (e.g. db.create.setNodeVectorProperty, db.create.setRelationshipVectorProperty).
+	VectorPropertySet *bool `json:"vectorPropertySet,omitempty"`
+}
+
 // toolProperties contains tool event properties (used for both STDIO and HTTP modes)
 // Note: Neo4j connection info (version, edition, cypher version) is sent once in CONNECTION_INITIALIZED event
 type toolProperties struct {
 	baseProperties
-	ToolUsed string `json:"tools_used"`
-	Success  bool   `json:"success"`
+	ToolUsed          string `json:"tools_used"`
+	Success           bool   `json:"success"`
+	VectorIndexCount  *int   `json:"vectorIndex,omitempty"`
+	VectorSearch      *bool  `json:"vectorSearch,omitempty"`
+	VectorPropertySet *bool  `json:"vectorPropertySet,omitempty"`
 }
 
 type TrackEvent struct {
@@ -123,14 +139,21 @@ func (a *Analytics) NewConnectionInitializedEvent(connInfo ConnectionEventInfo) 
 
 // NewToolEvent creates a tool usage event (used for both STDIO and HTTP modes)
 // Note: Connection info (Neo4j version, edition) is sent separately in CONNECTION_INITIALIZED event
-func (a *Analytics) NewToolEvent(toolsUsed string, success bool) TrackEvent {
+// The vectorInfo parameter is optional; when non-nil, vector-related properties are included.
+func (a *Analytics) NewToolEvent(toolsUsed string, success bool, vectorInfo *ToolVectorInfo) TrackEvent {
+	props := toolProperties{
+		baseProperties: a.getBaseProperties(),
+		ToolUsed:       toolsUsed,
+		Success:        success,
+	}
+	if vectorInfo != nil {
+		props.VectorIndexCount = vectorInfo.VectorIndexCount
+		props.VectorSearch = vectorInfo.VectorSearch
+		props.VectorPropertySet = vectorInfo.VectorPropertySet
+	}
 	return TrackEvent{
-		Event: strings.Join([]string{eventNamePrefix, "TOOL_USED"}, "_"),
-		Properties: toolProperties{
-			baseProperties: a.getBaseProperties(),
-			ToolUsed:       toolsUsed,
-			Success:        success,
-		},
+		Event:      strings.Join([]string{eventNamePrefix, "TOOL_USED"}, "_"),
+		Properties: props,
 	}
 }
 

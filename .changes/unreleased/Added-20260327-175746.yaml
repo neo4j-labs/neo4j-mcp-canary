@@ -1,0 +1,3 @@
+kind: Added
+body: LLM now are aware of vector indexes so they can use this with Cypher. Responses updated to support vectors
+time: 2026-03-27T17:57:46.282016Z

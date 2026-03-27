@@ -204,8 +204,8 @@ func TestEventCreation(t *testing.T) {
 		assertBaseProperties(t, event.Properties)
 	})
 
-	t.Run("NewToolEvent", func(t *testing.T) {
-		event := analyticsService.NewToolEvent("gds", true)
+	t.Run("NewToolEvent without vector info", func(t *testing.T) {
+		event := analyticsService.NewToolEvent("gds", true, nil)
 		if event.Event != "MCP-NEO4J-CANARY_TOOL_USED" {
 			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP-NEO4J-CANARY_TOOL_USED")
 		}
@@ -216,7 +216,86 @@ func TestEventCreation(t *testing.T) {
 		if props["success"] != true {
 			t.Errorf("unexpected success: got %v, want %v", props["success"], true)
 		}
-		// Note: Neo4j connection info (version, edition, cypher version) is sent separately in CONNECTION_INITIALIZED event
+		// Vector properties should not be present when vectorInfo is nil
+		if _, exists := props["vectorIndex"]; exists {
+			t.Errorf("vectorIndex should not be present when vectorInfo is nil")
+		}
+		if _, exists := props["vectorSearch"]; exists {
+			t.Errorf("vectorSearch should not be present when vectorInfo is nil")
+		}
+		if _, exists := props["vectorPropertySet"]; exists {
+			t.Errorf("vectorPropertySet should not be present when vectorInfo is nil")
+		}
+	})
+
+	t.Run("NewToolEvent with vector index count for get-schema", func(t *testing.T) {
+		count := 3
+		vectorInfo := &analytics.ToolVectorInfo{
+			VectorIndexCount: &count,
+		}
+		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo)
+		props := assertBaseProperties(t, event.Properties)
+		if props["tools_used"] != "get-schema" {
+			t.Errorf("unexpected tools_used: got %v, want %v", props["tools_used"], "get-schema")
+		}
+		if props["vectorIndex"] != float64(3) {
+			t.Errorf("unexpected vectorIndex: got %v, want %v", props["vectorIndex"], 3)
+		}
+		// vectorSearch and vectorPropertySet should not be present
+		if _, exists := props["vectorSearch"]; exists {
+			t.Errorf("vectorSearch should not be present for get-schema")
+		}
+	})
+
+	t.Run("NewToolEvent with zero vector indexes for get-schema", func(t *testing.T) {
+		count := 0
+		vectorInfo := &analytics.ToolVectorInfo{
+			VectorIndexCount: &count,
+		}
+		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo)
+		props := assertBaseProperties(t, event.Properties)
+		// Even with 0, the field should be present since the pointer is non-nil
+		if props["vectorIndex"] != float64(0) {
+			t.Errorf("unexpected vectorIndex: got %v, want %v", props["vectorIndex"], 0)
+		}
+	})
+
+	t.Run("NewToolEvent with vector search for read-cypher", func(t *testing.T) {
+		vectorSearch := true
+		vectorPropertySet := false
+		vectorInfo := &analytics.ToolVectorInfo{
+			VectorSearch:      &vectorSearch,
+			VectorPropertySet: &vectorPropertySet,
+		}
+		event := analyticsService.NewToolEvent("read-cypher", true, vectorInfo)
+		props := assertBaseProperties(t, event.Properties)
+		if props["vectorSearch"] != true {
+			t.Errorf("unexpected vectorSearch: got %v, want %v", props["vectorSearch"], true)
+		}
+		if props["vectorPropertySet"] != false {
+			t.Errorf("unexpected vectorPropertySet: got %v, want %v", props["vectorPropertySet"], false)
+		}
+		// vectorIndex should not be present for cypher tools
+		if _, exists := props["vectorIndex"]; exists {
+			t.Errorf("vectorIndex should not be present for read-cypher")
+		}
+	})
+
+	t.Run("NewToolEvent with vector property set for write-cypher", func(t *testing.T) {
+		vectorSearch := false
+		vectorPropertySet := true
+		vectorInfo := &analytics.ToolVectorInfo{
+			VectorSearch:      &vectorSearch,
+			VectorPropertySet: &vectorPropertySet,
+		}
+		event := analyticsService.NewToolEvent("write-cypher", true, vectorInfo)
+		props := assertBaseProperties(t, event.Properties)
+		if props["vectorSearch"] != false {
+			t.Errorf("unexpected vectorSearch: got %v, want %v", props["vectorSearch"], false)
+		}
+		if props["vectorPropertySet"] != true {
+			t.Errorf("unexpected vectorPropertySet: got %v, want %v", props["vectorPropertySet"], true)
+		}
 	})
 
 	t.Run("NewStartupEvent", func(t *testing.T) {

@@ -6,6 +6,7 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"log"
 	"log/slog"
@@ -425,21 +426,111 @@ func (s *Neo4jMCPServer) configureHooks() *server.Hooks {
 	return hooks
 }
 
-// handleToolCallComplete is called after every tool call completes
-func (s *Neo4jMCPServer) handleToolCallComplete(_ context.Context, _ any, request *mcp.CallToolRequest, result *mcp.CallToolResult) {
+// handleToolCallComplete is called after every tool call completes.
+// The result parameter is typed as `any` to match the OnAfterCallToolFunc signature
+// defined by the mcp-go SDK (v0.46.0+).
+func (s *Neo4jMCPServer) handleToolCallComplete(_ context.Context, _ any, request *mcp.CallToolRequest, result any) {
 	if s.anService == nil || !s.anService.IsEnabled() {
 		return
 	}
 
 	toolName := request.Params.Name
-	success := !result.IsError
+
+	// Determine success from the result. The SDK passes the raw result as `any`;
+	// type-assert to *mcp.CallToolResult to inspect the IsError field.
+	var toolResult *mcp.CallToolResult
+	success := true
+	if tr, ok := result.(*mcp.CallToolResult); ok {
+		toolResult = tr
+		success = !tr.IsError
+	}
+
+	// Build vector info based on tool type
+	var vectorInfo *analytics.ToolVectorInfo
+	switch toolName {
+	case "get-schema":
+		vectorInfo = extractSchemaVectorInfo(toolResult)
+	case "read-cypher", "write-cypher":
+		vectorInfo = extractCypherVectorInfo(request)
+	}
 
 	// Emit tool event (connection info sent separately in CONNECTION_INITIALIZED event)
-	s.anService.EmitEvent(s.anService.NewToolEvent(toolName, success))
+	s.anService.EmitEvent(s.anService.NewToolEvent(toolName, success, vectorInfo))
 
 	// Handle GDS events for cypher tools
 	if toolName == "read-cypher" || toolName == "write-cypher" {
 		s.emitGDSEventsIfNeeded(request)
+	}
+}
+
+// extractSchemaVectorInfo parses the get-schema result to count VECTOR indexes.
+// Returns nil if the result cannot be parsed (graceful degradation — analytics
+// should never break tool execution).
+func extractSchemaVectorInfo(result *mcp.CallToolResult) *analytics.ToolVectorInfo {
+	if result == nil || result.IsError || len(result.Content) == 0 {
+		return nil
+	}
+	textContent, ok := result.Content[0].(mcp.TextContent)
+	if !ok {
+		return nil
+	}
+
+	// Minimal struct to extract just the indexes type field
+	var schema struct {
+		Indexes []struct {
+			Type string `json:"type"`
+		} `json:"indexes"`
+	}
+	if err := json.Unmarshal([]byte(textContent.Text), &schema); err != nil {
+		slog.Debug("failed to parse get-schema result for vector analytics", "error", err)
+		return nil
+	}
+
+	vectorCount := 0
+	for _, idx := range schema.Indexes {
+		if idx.Type == "VECTOR" {
+			vectorCount++
+		}
+	}
+
+	return &analytics.ToolVectorInfo{
+		VectorIndexCount: &vectorCount,
+	}
+}
+
+// extractCypherVectorInfo inspects a Cypher query to detect vector search and vector property set operations.
+// Detection is based on well-known procedure names and Cypher patterns.
+func extractCypherVectorInfo(request *mcp.CallToolRequest) *analytics.ToolVectorInfo {
+	args, ok := request.Params.Arguments.(map[string]any)
+	if !ok {
+		return nil
+	}
+	queryRaw, ok := args["query"]
+	if !ok {
+		return nil
+	}
+	queryStr, ok := queryRaw.(string)
+	if !ok {
+		return nil
+	}
+
+	lowerQuery := strings.ToLower(queryStr)
+
+	// Detect vector search: db.index.vector.queryNodes / db.index.vector.queryRelationships
+	vectorSearch := strings.Contains(lowerQuery, "db.index.vector.query")
+
+	// Detect vector property set: db.create.setNodeVectorProperty / db.create.setRelationshipVectorProperty
+	vectorPropertySet := strings.Contains(lowerQuery, "db.create.setnodevectorproperty") ||
+		strings.Contains(lowerQuery, "db.create.setrelationshipvectorproperty")
+
+	// Only return vector info if at least one vector operation was detected
+	if !vectorSearch && !vectorPropertySet {
+		return nil
+	}
+
+	return &analytics.ToolVectorInfo{
+		VectorSearch:      &vectorSearch,
+		VectorPropertySet: &vectorPropertySet,
 	}
 }
 
