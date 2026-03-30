@@ -293,9 +293,13 @@ func processRelProperties(records []*neo4j.Record) (map[string]map[string]string
 }
 
 // buildNodeSchemas creates a sorted list of NodeSchema from the per-label property map.
+// Labels matching internal prefixes (e.g. _Bloom_) are excluded.
 func buildNodeSchemas(nodeProps map[string]map[string]string) []NodeSchema {
 	nodes := make([]NodeSchema, 0, len(nodeProps))
 	for label, props := range nodeProps {
+		if isInternalLabel(label) {
+			continue
+		}
 		var properties map[string]string
 		if len(props) > 0 {
 			properties = props
@@ -339,6 +343,11 @@ func buildRelSchemas(relProps map[string]map[string]string, patternRecords []*ne
 			continue
 		}
 
+		// Skip patterns involving internal labels or relationship types
+		if isInternalLabel(from) || isInternalLabel(to) || isInternalLabel(relType) {
+			continue
+		}
+
 		key := patternKey{from: from, relType: relType, to: to}
 		if seen[key] {
 			continue
@@ -363,7 +372,7 @@ func buildRelSchemas(relProps map[string]map[string]string, patternRecords []*ne
 	// This handles the edge case where the patterns query returned nil (graceful degradation)
 	// but relationship properties were still discovered.
 	for relType, props := range relProps {
-		if seenTypes[relType] {
+		if seenTypes[relType] || isInternalLabel(relType) {
 			continue
 		}
 		var properties map[string]string
@@ -427,6 +436,11 @@ func processIndexes(records []*neo4j.Record) []IndexInfo {
 		labelsOrTypes, _ := toStringSlice(labelsOrTypesRaw)
 		properties, _ := toStringSlice(propertiesRaw)
 
+		// Skip indexes that exclusively reference internal labels/types
+		if allInternal(labelsOrTypes) {
+			continue
+		}
+
 		info := IndexInfo{
 			Name:          name,
 			Type:          indexType,
@@ -471,6 +485,41 @@ func extractVectorConfig(info *IndexInfo, optionsRaw any) {
 	if simFunc, ok := indexConfig["vector.similarity_function"].(string); ok {
 		info.SimilarityFunction = &simFunc
 	}
+}
+
+// --- Filtering ---
+
+// internalLabelPrefixes lists prefixes used by Neo4j tooling for internal metadata.
+// Labels and relationship types matching these prefixes are excluded from schema output
+// because they represent tool-specific state (e.g. Bloom perspectives and scenes)
+// that has no value for LLM-driven query authoring.
+var internalLabelPrefixes = []string{
+	"_Bloom_",
+}
+
+// isInternalLabel returns true if the label or relationship type is internal metadata
+// that should be excluded from the schema output.
+func isInternalLabel(name string) bool {
+	for _, prefix := range internalLabelPrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// allInternal returns true if every entry in the slice is an internal label.
+// Returns false for empty slices (an index with no labels should not be silently dropped).
+func allInternal(names []string) bool {
+	if len(names) == 0 {
+		return false
+	}
+	for _, name := range names {
+		if !isInternalLabel(name) {
+			return false
+		}
+	}
+	return true
 }
 
 // --- Helpers ---

@@ -345,6 +345,77 @@ func TestGetSchemaHandler_PatternsQueryGracefulDegradation(t *testing.T) {
 	}`, getResultText(t, result))
 }
 
+// --- Bloom filtering integration test with realistic data ---
+
+func TestGetSchemaProcessing_BloomNodesFullyExcluded(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	// Simulates a real database with Bloom metadata alongside user data
+	expectFourQueries(mockDB,
+		[]*neo4j.Record{
+			nodeRecord([]string{"Article"}, "title", []string{"String"}),
+			nodeRecord([]string{"Article"}, "id", []string{"String"}),
+			nodeRecord([]string{"Organization"}, "name", []string{"String"}),
+			nodeRecord([]string{"_Bloom_Perspective_"}, "id", []string{"String"}),
+			nodeRecord([]string{"_Bloom_Perspective_"}, "name", []string{"String"}),
+			nodeRecord([]string{"_Bloom_Perspective_"}, "data", []string{"String"}),
+			nodeRecord([]string{"_Bloom_Perspective_"}, "roles", []string{"StringArray"}),
+			nodeRecord([]string{"_Bloom_Scene_"}, "id", []string{"String"}),
+			nodeRecord([]string{"_Bloom_Scene_"}, "name", []string{"String"}),
+			nodeRecord([]string{"_Bloom_Scene_"}, "visualisation", []string{"String"}),
+			nodeRecord([]string{"_Bloom_Scene_"}, "style", []string{"String"}),
+			nodeRecord([]string{"_Bloom_Scene_"}, "nodes", []string{"String"}),
+		},
+		[]*neo4j.Record{
+			relRecord(":`MENTIONS`", "count", []string{"Long"}),
+			relRecord(":`_Bloom_HAS_SCENE_`", "order", []string{"Long"}),
+		},
+		[]*neo4j.Record{
+			patternRecord("Article", "MENTIONS", "Organization"),
+			patternRecord("_Bloom_Perspective_", "_Bloom_HAS_SCENE_", "_Bloom_Scene_"),
+		},
+		[]*neo4j.Record{
+			indexRecord("article-id", "RANGE", "NODE",
+				[]string{"Article"}, []string{"id"}, map[string]any{}),
+			indexRecord("bloom-perspective-id", "RANGE", "NODE",
+				[]string{"_Bloom_Perspective_"}, []string{"id"}, map[string]any{}),
+		},
+		nil, nil, nil, nil,
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+	}
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	// Bloom nodes, relationships, and indexes should all be absent
+	assertJSONEquals(t, `{
+		"nodes": [
+			{"label": "Article", "properties": {"title": "STRING", "id": "STRING"}},
+			{"label": "Organization", "properties": {"name": "STRING"}}
+		],
+		"relationships": [
+			{"type": "MENTIONS", "from": "Article", "to": "Organization", "properties": {"count": "INTEGER"}}
+		],
+		"indexes": [
+			{"name": "article-id", "type": "RANGE", "entityType": "NODE", "labelsOrTypes": ["Article"], "properties": ["id"]}
+		]
+	}`, getResultText(t, result))
+}
+
 func TestGetSchemaHandler_IndexesQueryGracefulDegradation(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -792,6 +863,77 @@ func TestGetSchemaProcessing(t *testing.T) {
 					{"label": "EmptyLabel"},
 					{"label": "Person", "properties": {"name": "STRING"}}
 				]
+			}`,
+		},
+		{
+			name: "Bloom nodes are excluded from schema output",
+			nodeRecords: []*neo4j.Record{
+				nodeRecord([]string{"Movie"}, "title", []string{"String"}),
+				nodeRecord([]string{"_Bloom_Perspective_"}, "id", []string{"String"}),
+				nodeRecord([]string{"_Bloom_Perspective_"}, "name", []string{"String"}),
+				nodeRecord([]string{"_Bloom_Scene_"}, "id", []string{"String"}),
+				nodeRecord([]string{"_Bloom_Scene_"}, "visualisation", []string{"String"}),
+			},
+			relRecords:     []*neo4j.Record{},
+			patternRecords: []*neo4j.Record{},
+			indexRecords:   []*neo4j.Record{},
+			expectedJSON: `{
+				"nodes": [{"label": "Movie", "properties": {"title": "STRING"}}]
+			}`,
+		},
+		{
+			name: "Bloom relationships are excluded from schema output",
+			nodeRecords: []*neo4j.Record{
+				nodeRecord([]string{"Movie"}, "title", []string{"String"}),
+				nodeRecord([]string{"_Bloom_Perspective_"}, "id", []string{"String"}),
+				nodeRecord([]string{"_Bloom_Scene_"}, "id", []string{"String"}),
+			},
+			relRecords: []*neo4j.Record{
+				relRecord(":`ACTED_IN`", "roles", []string{"StringArray"}),
+				relRecord(":`_Bloom_HAS_SCENE_`", "order", []string{"Long"}),
+			},
+			patternRecords: []*neo4j.Record{
+				patternRecord("Person", "ACTED_IN", "Movie"),
+				patternRecord("_Bloom_Perspective_", "_Bloom_HAS_SCENE_", "_Bloom_Scene_"),
+			},
+			indexRecords: []*neo4j.Record{},
+			expectedJSON: `{
+				"nodes": [{"label": "Movie", "properties": {"title": "STRING"}}],
+				"relationships": [{"type": "ACTED_IN", "from": "Person", "to": "Movie", "properties": {"roles": "LIST<STRING>"}}]
+			}`,
+		},
+		{
+			name: "Bloom indexes are excluded from schema output",
+			nodeRecords: []*neo4j.Record{
+				nodeRecord([]string{"Movie"}, "title", []string{"String"}),
+			},
+			relRecords:     []*neo4j.Record{},
+			patternRecords: []*neo4j.Record{},
+			indexRecords: []*neo4j.Record{
+				indexRecord("movie-title-range", "RANGE", "NODE",
+					[]string{"Movie"}, []string{"title"}, map[string]any{}),
+				indexRecord("bloom-perspective-id", "RANGE", "NODE",
+					[]string{"_Bloom_Perspective_"}, []string{"id"}, map[string]any{}),
+			},
+			expectedJSON: `{
+				"nodes": [{"label": "Movie", "properties": {"title": "STRING"}}],
+				"indexes": [{"name": "movie-title-range", "type": "RANGE", "entityType": "NODE", "labelsOrTypes": ["Movie"], "properties": ["title"]}]
+			}`,
+		},
+		{
+			name: "mixed index with both internal and user labels is kept",
+			nodeRecords: []*neo4j.Record{
+				nodeRecord([]string{"Movie"}, "title", []string{"String"}),
+			},
+			relRecords:     []*neo4j.Record{},
+			patternRecords: []*neo4j.Record{},
+			indexRecords: []*neo4j.Record{
+				indexRecord("mixed-fulltext", "FULLTEXT", "NODE",
+					[]string{"Movie", "_Bloom_Perspective_"}, []string{"name"}, map[string]any{}),
+			},
+			expectedJSON: `{
+				"nodes": [{"label": "Movie", "properties": {"title": "STRING"}}],
+				"indexes": [{"name": "mixed-fulltext", "type": "FULLTEXT", "entityType": "NODE", "labelsOrTypes": ["Movie", "_Bloom_Perspective_"], "properties": ["name"]}]
 			}`,
 		},
 		{
