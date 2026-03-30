@@ -30,6 +30,7 @@ type toolCategory int
 const (
 	cypherCategory toolCategory = 0
 	gdsCategory    toolCategory = 1
+	vectorCategory toolCategory = 2
 )
 
 type ToolDefinition struct {
@@ -57,6 +58,25 @@ func (s *Neo4jMCPServer) addGDSTools() {
 	s.MCPServer.AddTools(toolDefinition...)
 }
 
+func (s *Neo4jMCPServer) addVectorTools() {
+	deps := &tools.ToolDependencies{
+		DBService:        s.dbService,
+		AnalyticsService: s.anService,
+	}
+	toolDefs := s.getAllToolsDefs(deps)
+	toolDefinition := make([]server.ServerTool, 0)
+	vectorTools := make([]ToolDefinition, 0, len(toolDefs))
+	for _, t := range toolDefs {
+		if t.category == vectorCategory {
+			vectorTools = append(vectorTools, t)
+		}
+	}
+	for _, toolDef := range vectorTools {
+		toolDefinition = append(toolDefinition, toolDef.definition)
+	}
+	s.MCPServer.AddTools(toolDefinition...)
+}
+
 func (s *Neo4jMCPServer) getEnabledTools() []server.ServerTool {
 	filters := make([]toolFilter, 0)
 
@@ -67,6 +87,10 @@ func (s *Neo4jMCPServer) getEnabledTools() []server.ServerTool {
 	// If GDS is not installed, disable GDS tools.
 	if !s.gdsInstalled {
 		filters = append(filters, filterGDSTools)
+	}
+	// If no vector indexes are found, disable vector tools.
+	if !s.vectorIndexesFound {
+		filters = append(filters, filterVectorTools)
 	}
 	deps := &tools.ToolDependencies{
 		DBService:        s.dbService,
@@ -104,6 +128,16 @@ func filterGDSTools(tools []ToolDefinition) []ToolDefinition {
 	return nonGDSTools
 }
 
+func filterVectorTools(tools []ToolDefinition) []ToolDefinition {
+	nonVectorTools := make([]ToolDefinition, 0, len(tools))
+	for _, t := range tools {
+		if t.category != vectorCategory {
+			nonVectorTools = append(nonVectorTools, t)
+		}
+	}
+	return nonVectorTools
+}
+
 // getAllToolsDefs returns all available tools with their specs and handlers
 func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDefinition {
 
@@ -138,6 +172,15 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 			definition: server.ServerTool{
 				Tool:    gds.ListGDSProceduresSpec(),
 				Handler: gds.ListGdsProceduresHandler(deps),
+			},
+			readonly: true,
+		},
+		// Vector Category/Section
+		{
+			category: vectorCategory,
+			definition: server.ServerTool{
+				Tool:    cypher.VectorSearchSpec(),
+				Handler: cypher.VectorSearchHandler(deps),
 			},
 			readonly: true,
 		},

@@ -260,6 +260,35 @@ func TestEventCreation(t *testing.T) {
 		}
 	})
 
+	t.Run("NewToolEvent with fulltext index count for get-schema", func(t *testing.T) {
+		vectorCount := 2
+		fulltextCount := 5
+		vectorInfo := &analytics.ToolVectorInfo{
+			VectorIndexCount:   &vectorCount,
+			FullTextIndexCount: &fulltextCount,
+		}
+		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo)
+		props := assertBaseProperties(t, event.Properties)
+		if props["vectorIndex"] != float64(2) {
+			t.Errorf("unexpected vectorIndex: got %v, want %v", props["vectorIndex"], 2)
+		}
+		if props["fullTextIndex"] != float64(5) {
+			t.Errorf("unexpected fullTextIndex: got %v, want %v", props["fullTextIndex"], 5)
+		}
+	})
+
+	t.Run("NewToolEvent without fulltext index count omits field", func(t *testing.T) {
+		vectorCount := 1
+		vectorInfo := &analytics.ToolVectorInfo{
+			VectorIndexCount: &vectorCount,
+		}
+		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo)
+		props := assertBaseProperties(t, event.Properties)
+		if _, exists := props["fullTextIndex"]; exists {
+			t.Errorf("fullTextIndex should not be present when not set")
+		}
+	})
+
 	t.Run("NewToolEvent with vector search for read-cypher", func(t *testing.T) {
 		vectorSearch := true
 		vectorPropertySet := false

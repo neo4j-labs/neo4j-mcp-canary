@@ -21,6 +21,7 @@ import (
 const (
 	checkApocMetaSchemaQuery = "SHOW PROCEDURES YIELD name WHERE name = 'apoc.meta.schema' RETURN count(name) > 0 AS apocMetaSchemaAvailable"
 	gdsVersionQuery          = "RETURN gds.version() as gdsVersion"
+	vectorIndexCountQuery    = "SHOW INDEXES YIELD type WHERE type = 'VECTOR' RETURN count(*) AS count"
 )
 
 func apocAvailableRecord(available bool) []*neo4j.Record {
@@ -37,6 +38,15 @@ func gdsVersionRecord(version string) []*neo4j.Record {
 		{
 			Keys:   []string{"gdsVersion"},
 			Values: []any{version},
+		},
+	}
+}
+
+func vectorIndexCountRecord(count int64) []*neo4j.Record {
+	return []*neo4j.Record{
+		{
+			Keys:   []string{"count"},
+			Values: []any{count},
 		},
 	}
 }
@@ -64,6 +74,7 @@ func TestNewNeo4jMCPServer(t *testing.T) {
 		mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), checkApocMetaSchemaQuery, gomock.Any()).Times(1).Return(apocAvailableRecord(true), nil)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(gdsVersionRecord("2.22.0"), nil)
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), vectorIndexCountQuery, gomock.Any()).Times(1).Return(vectorIndexCountRecord(0), nil)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
 
 		s := server.NewNeo4jMCPServer("test-version", cfg, mockDB, analyticsService)
@@ -113,6 +124,7 @@ func TestNewNeo4jMCPServer(t *testing.T) {
 		mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), checkApocMetaSchemaQuery, gomock.Any()).Times(1).Return(apocAvailableRecord(true), nil)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(gdsVersionRecord("2.22.0"), nil)
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), vectorIndexCountQuery, gomock.Any()).Times(1).Return(vectorIndexCountRecord(0), nil)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
 
 		s := server.NewNeo4jMCPServer("test-version", cfg, mockDB, analyticsService)
@@ -137,6 +149,7 @@ func TestNewNeo4jMCPServer(t *testing.T) {
 		mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), checkApocMetaSchemaQuery, gomock.Any()).Times(1).Return(apocAvailableRecord(true), nil)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(nil, fmt.Errorf("Unknown function 'gds.version'"))
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), vectorIndexCountQuery, gomock.Any()).Times(1).Return(vectorIndexCountRecord(0), nil)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
 
 		s := server.NewNeo4jMCPServer("test-version", cfg, mockDB, analyticsService)
@@ -155,6 +168,7 @@ func TestNewNeo4jMCPServer(t *testing.T) {
 		mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), checkApocMetaSchemaQuery, gomock.Any()).Times(1).Return(apocAvailableRecord(true), nil)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(gdsVersionRecord("2.22.0"), nil)
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), vectorIndexCountQuery, gomock.Any()).Times(1).Return(vectorIndexCountRecord(0), nil)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
 
 		s := server.NewNeo4jMCPServer("test-version", cfg, mockDB, analyticsService)
@@ -185,6 +199,7 @@ func TestNewNeo4jMCPServerEvents(t *testing.T) {
 	mockDB.EXPECT().VerifyConnectivity(gomock.Any()).AnyTimes()
 	mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), checkApocMetaSchemaQuery, gomock.Any()).AnyTimes().Return(apocAvailableRecord(true), nil)
 	mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).AnyTimes().Return(gdsVersionRecord("2.22.0"), nil)
+	mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), vectorIndexCountQuery, gomock.Any()).AnyTimes().Return(vectorIndexCountRecord(0), nil)
 	mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1).Return([]*neo4j.Record{
 		{
 			Keys:   []string{"name", "edition", "versions"},

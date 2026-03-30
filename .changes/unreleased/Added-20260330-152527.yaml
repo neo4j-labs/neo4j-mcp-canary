@@ -1,0 +1,3 @@
+kind: Added
+body: Detects use of SEARCH ... IN ( VECTOR INDEX ... ) as this is the preferred way to do Vector searches
+time: 2026-03-30T15:25:27.653101+01:00

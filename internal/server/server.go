@@ -36,6 +36,17 @@ const (
 	serverHTTPReadTimeout       = 15 * time.Second  // SECURITY: Maximum time to read entire request including body (prevents slow-read attacks)
 	serverHTTPWriteTimeout      = 60 * time.Second  // FUNCTIONALITY: Maximum time to write response (allows complex Neo4j queries and large result sets)
 	serverHTTPIdleTimeout       = 120 * time.Second // PERFORMANCE: Maximum time to keep idle keep-alive connections open (improves connection reuse)
+	mcpServerInstruction        = "This is the Neo4j official MCP server providing tool calling to interact " +
+		"with your Neo4j database. Always start by calling get-schema to understand " +
+		"the graph data model, available relationships, and importantly, any vector " +
+		"indexes which enable semantic similarity search via " +
+		"db.index.vector.queryNodes. When the user's query is conceptual or " +
+		"topical, prefer vector similarity over fulltext or keyword matching — " +
+		"use fulltext only to locate a high-quality seed node, then search by " +
+		"embedding. Check list-gds-procedures for available graph analytics " +
+		"such as centrality, community detection, and pathfinding before " +
+		"writing manual traversals. Use read-cypher for queries and " +
+		"write-cypher for mutations."
 )
 
 // Neo4jMCPServer represents the MCP server instance
@@ -49,6 +60,7 @@ type Neo4jMCPServer struct {
 	version            string
 	anService          analytics.Service
 	gdsInstalled       bool
+	vectorIndexesFound bool
 	initMu             sync.Mutex
 	connectionVerified atomic.Bool
 }
@@ -64,7 +76,8 @@ func NewNeo4jMCPServer(version string, cfg *config.Config, dbService database.Se
 		dbService:       dbService,
 		version:         version,
 		anService:       anService,
-		gdsInstalled:    false,
+		gdsInstalled:       false,
+		vectorIndexesFound: false,
 	}
 
 	hooks := neo4jServer.configureHooks()
@@ -74,8 +87,7 @@ func NewNeo4jMCPServer(version string, cfg *config.Config, dbService database.Se
 		version,
 		server.WithToolCapabilities(true),
 		server.WithHooks(hooks),
-		server.WithInstructions("This is the Neo4j official MCP server and can provide tool calling to interact with your Neo4j database,"+
-			"by inferring the schema with tools like get-schema and executing arbitrary Cypher queries with read-cypher."),
+		server.WithInstructions(mcpServerInstruction),
 	)
 
 	neo4jServer.MCPServer = mcpServer
@@ -171,16 +183,41 @@ func (s *Neo4jMCPServer) verifyRequirements(ctx context.Context) error {
 		// GDS is optional, so we log a warning and continue, assuming it's not installed.
 		log.Print("Impossible to verify GDS installation.")
 		s.gdsInstalled = false
-		return nil
-	}
-	if len(records) == 1 && len(records[0].Values) == 1 {
+	} else if len(records) == 1 && len(records[0].Values) == 1 {
 		_, ok := records[0].Values[0].(string)
 		if ok {
 			s.gdsInstalled = true
 		}
 	}
 
+	// Check for vector indexes to enable the vector-search tool
+	vectorRecords, err := s.dbService.ExecuteReadQuery(ctx,
+		"SHOW INDEXES YIELD type WHERE type = 'VECTOR' RETURN count(*) AS count", nil)
+	if err != nil {
+		slog.Warn("failed to check for vector indexes, vector-search tool will be disabled", "error", err)
+		s.vectorIndexesFound = false
+	} else if len(vectorRecords) == 1 && len(vectorRecords[0].Values) >= 1 {
+		if count, ok := toInt64Value(vectorRecords[0].Values[0]); ok && count > 0 {
+			s.vectorIndexesFound = true
+			slog.Info("vector indexes detected, enabling vector-search tool", "count", count)
+		}
+	}
+
 	return nil
+}
+
+// toInt64Value converts a numeric value to int64, handling the common Neo4j driver types.
+func toInt64Value(raw any) (int64, bool) {
+	switch v := raw.(type) {
+	case int64:
+		return v, true
+	case int:
+		return int64(v), true
+	case float64:
+		return int64(v), true
+	default:
+		return 0, false
+	}
 }
 
 // emitServerStartupEvent emits the server startup event immediately with available info (no DB query)
@@ -417,6 +454,10 @@ func (s *Neo4jMCPServer) configureHooks() *server.Hooks {
 				s.addGDSTools()
 			}
 
+			if s.vectorIndexesFound {
+				s.addVectorTools()
+			}
+
 			s.emitConnectionInitializedEvent(ctx)
 
 			s.connectionVerified.Store(true)
@@ -452,6 +493,11 @@ func (s *Neo4jMCPServer) handleToolCallComplete(_ context.Context, _ any, reques
 		vectorInfo = extractSchemaVectorInfo(toolResult)
 	case "read-cypher", "write-cypher":
 		vectorInfo = extractCypherVectorInfo(request)
+	case "vector-search":
+		vectorSearchTrue := true
+		vectorInfo = &analytics.ToolVectorInfo{
+			VectorSearch: &vectorSearchTrue,
+		}
 	}
 
 	// Emit tool event (connection info sent separately in CONNECTION_INITIALIZED event)
@@ -487,14 +533,19 @@ func extractSchemaVectorInfo(result *mcp.CallToolResult) *analytics.ToolVectorIn
 	}
 
 	vectorCount := 0
+	fulltextCount := 0
 	for _, idx := range schema.Indexes {
 		if idx.Type == "VECTOR" {
 			vectorCount++
 		}
+		if idx.Type == "FULLTEXT" {
+			fulltextCount++
+		}
 	}
 
 	return &analytics.ToolVectorInfo{
-		VectorIndexCount: &vectorCount,
+		VectorIndexCount:   &vectorCount,
+		FullTextIndexCount: &fulltextCount,
 	}
 }
 

@@ -55,11 +55,13 @@ type unauthenticatedJsonRpcProperties struct {
 	JsonRpcMethod string `json:"method"`
 }
 
-// ToolVectorInfo carries optional vector-related properties for tool events.
+// ToolVectorInfo carries optional vector and index-related properties for tool events.
 // When nil, no vector properties are included in the event.
 type ToolVectorInfo struct {
 	// VectorIndexCount is the number of VECTOR indexes detected in the get-schema response.
 	VectorIndexCount *int `json:"vectorIndex,omitempty"`
+	// FullTextIndexCount is the number of FULLTEXT indexes detected in the get-schema response.
+	FullTextIndexCount *int `json:"fullTextIndex,omitempty"`
 	// VectorSearch indicates whether the Cypher query uses vector index search
 	// (e.g. db.index.vector.queryNodes, db.index.vector.queryRelationships).
 	VectorSearch *bool `json:"vectorSearch,omitempty"`
@@ -72,11 +74,12 @@ type ToolVectorInfo struct {
 // Note: Neo4j connection info (version, edition, cypher version) is sent once in CONNECTION_INITIALIZED event
 type toolProperties struct {
 	baseProperties
-	ToolUsed          string `json:"tools_used"`
-	Success           bool   `json:"success"`
-	VectorIndexCount  *int   `json:"vectorIndex,omitempty"`
-	VectorSearch      *bool  `json:"vectorSearch,omitempty"`
-	VectorPropertySet *bool  `json:"vectorPropertySet,omitempty"`
+	ToolUsed           string `json:"tools_used"`
+	Success            bool   `json:"success"`
+	VectorIndexCount   *int   `json:"vectorIndex,omitempty"`
+	FullTextIndexCount *int   `json:"fullTextIndex,omitempty"`
+	VectorSearch       *bool  `json:"vectorSearch,omitempty"`
+	VectorPropertySet  *bool  `json:"vectorPropertySet,omitempty"`
 }
 
 type TrackEvent struct {
@@ -148,6 +151,7 @@ func (a *Analytics) NewToolEvent(toolsUsed string, success bool, vectorInfo *Too
 	}
 	if vectorInfo != nil {
 		props.VectorIndexCount = vectorInfo.VectorIndexCount
+		props.FullTextIndexCount = vectorInfo.FullTextIndexCount
 		props.VectorSearch = vectorInfo.VectorSearch
 		props.VectorPropertySet = vectorInfo.VectorPropertySet
 	}

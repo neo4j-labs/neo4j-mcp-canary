@@ -1,0 +1,3 @@
+kind: Added
+body: Track fulltext index count (fullTextIndex) in get-schema analytics events alongside existing vector index count
+time: 2026-03-30T16:30:30.000000+01:00
