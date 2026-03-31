@@ -38,12 +38,10 @@ const (
 	serverHTTPIdleTimeout       = 120 * time.Second // PERFORMANCE: Maximum time to keep idle keep-alive connections open (improves connection reuse)
 	mcpServerInstruction        = "This is the Neo4j official MCP server providing tool calling to interact " +
 		"with your Neo4j database. Always start by calling get-schema to understand " +
-		"the graph data model, available relationships, and importantly, any vector " +
-		"indexes which enable semantic similarity search via " +
-		"db.index.vector.queryNodes. When the user's query is conceptual or " +
-		"topical, prefer vector similarity over fulltext or keyword matching — " +
-		"use fulltext only to locate a high-quality seed node, then search by " +
-		"embedding. Check list-gds-procedures for available graph analytics " +
+		"the graph data model, available relationships, and indexes " +
+		"(including full-text indexes which can be queried with " +
+		"db.index.fulltext.queryNodes() and db.index.fulltext.queryRelationships()). " +
+		"Check list-gds-procedures for available graph analytics " +
 		"such as centrality, community detection, and pathfinding before " +
 		"writing manual traversals. Use read-cypher for queries and " +
 		"write-cypher for mutations."
@@ -70,12 +68,12 @@ type Neo4jMCPServer struct {
 func NewNeo4jMCPServer(version string, cfg *config.Config, dbService database.Service, anService analytics.Service) *Neo4jMCPServer {
 
 	neo4jServer := &Neo4jMCPServer{
-		HTTPServerReady: make(chan struct{}),
-		shutdownChan:    make(chan struct{}),
-		config:          cfg,
-		dbService:       dbService,
-		version:         version,
-		anService:       anService,
+		HTTPServerReady:    make(chan struct{}),
+		shutdownChan:       make(chan struct{}),
+		config:             cfg,
+		dbService:          dbService,
+		version:            version,
+		anService:          anService,
 		gdsInstalled:       false,
 		vectorIndexesFound: false,
 	}
@@ -549,8 +547,8 @@ func extractSchemaVectorInfo(result *mcp.CallToolResult) *analytics.ToolVectorIn
 	}
 }
 
-// extractCypherVectorInfo inspects a Cypher query to detect vector search and vector property set operations.
-// Detection is based on well-known procedure names and Cypher patterns.
+// extractCypherVectorInfo inspects a Cypher query to detect vector search, vector property set,
+// and full-text search operations. Detection is based on well-known procedure names and Cypher patterns.
 func extractCypherVectorInfo(request *mcp.CallToolRequest) *analytics.ToolVectorInfo {
 	args, ok := request.Params.Arguments.(map[string]any)
 	if !ok {
@@ -574,14 +572,19 @@ func extractCypherVectorInfo(request *mcp.CallToolRequest) *analytics.ToolVector
 	vectorPropertySet := strings.Contains(lowerQuery, "db.create.setnodevectorproperty") ||
 		strings.Contains(lowerQuery, "db.create.setrelationshipvectorproperty")
 
-	// Only return vector info if at least one vector operation was detected
-	if !vectorSearch && !vectorPropertySet {
+	// Detect full-text search: db.index.fulltext.queryNodes / db.index.fulltext.queryRelationships
+	fullTextSearch := strings.Contains(lowerQuery, "db.index.fulltext.querynodes") ||
+		strings.Contains(lowerQuery, "db.index.fulltext.queryrelationships")
+
+	// Only return info if at least one operation was detected
+	if !vectorSearch && !vectorPropertySet && !fullTextSearch {
 		return nil
 	}
 
 	return &analytics.ToolVectorInfo{
 		VectorSearch:      &vectorSearch,
 		VectorPropertySet: &vectorPropertySet,
+		FullTextSearch:    &fullTextSearch,
 	}
 }
 

@@ -1,3 +1,0 @@
-kind: Changed
-body: Fix in server.go for The mcp-go SDK (v0.46.0) defines OnAfterCallToolFunc with the fourth parameter as any, not *mcp.CallToolResult.
-time: 2026-03-27T16:39:18.38408Z

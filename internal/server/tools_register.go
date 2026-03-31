@@ -4,6 +4,8 @@
 package server
 
 import (
+	"time"
+
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/cypher"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/gds"
@@ -40,10 +42,7 @@ type ToolDefinition struct {
 }
 
 func (s *Neo4jMCPServer) addGDSTools() {
-	deps := &tools.ToolDependencies{
-		DBService:        s.dbService,
-		AnalyticsService: s.anService,
-	}
+	deps := s.buildToolDependencies()
 	toolDefs := s.getAllToolsDefs(deps)
 	toolDefinition := make([]server.ServerTool, 0)
 	GDSTools := make([]ToolDefinition, 0, len(toolDefs))
@@ -59,10 +58,7 @@ func (s *Neo4jMCPServer) addGDSTools() {
 }
 
 func (s *Neo4jMCPServer) addVectorTools() {
-	deps := &tools.ToolDependencies{
-		DBService:        s.dbService,
-		AnalyticsService: s.anService,
-	}
+	deps := s.buildToolDependencies()
 	toolDefs := s.getAllToolsDefs(deps)
 	toolDefinition := make([]server.ServerTool, 0)
 	vectorTools := make([]ToolDefinition, 0, len(toolDefs))
@@ -92,10 +88,7 @@ func (s *Neo4jMCPServer) getEnabledTools() []server.ServerTool {
 	if !s.vectorIndexesFound {
 		filters = append(filters, filterVectorTools)
 	}
-	deps := &tools.ToolDependencies{
-		DBService:        s.dbService,
-		AnalyticsService: s.anService,
-	}
+	deps := s.buildToolDependencies()
 	toolDefs := s.getAllToolsDefs(deps)
 
 	for _, filter := range filters {
@@ -138,6 +131,16 @@ func filterVectorTools(tools []ToolDefinition) []ToolDefinition {
 	return nonVectorTools
 }
 
+// buildToolDependencies creates a ToolDependencies with all config wired through.
+func (s *Neo4jMCPServer) buildToolDependencies() *tools.ToolDependencies {
+	return &tools.ToolDependencies{
+		DBService:        s.dbService,
+		AnalyticsService: s.anService,
+		SchemaSampleSize: int(s.config.SchemaSampleSize),
+		SchemaTimeout:    time.Duration(s.config.SchemaTimeoutSeconds) * time.Second,
+	}
+}
+
 // getAllToolsDefs returns all available tools with their specs and handlers
 func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDefinition {
 
@@ -172,15 +175,6 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 			definition: server.ServerTool{
 				Tool:    gds.ListGDSProceduresSpec(),
 				Handler: gds.ListGdsProceduresHandler(deps),
-			},
-			readonly: true,
-		},
-		// Vector Category/Section
-		{
-			category: vectorCategory,
-			definition: server.ServerTool{
-				Tool:    cypher.VectorSearchSpec(),
-				Handler: cypher.VectorSearchHandler(deps),
 			},
 			readonly: true,
 		},

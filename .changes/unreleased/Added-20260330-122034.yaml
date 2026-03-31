@@ -1,3 +1,0 @@
-kind: Added
-body: Remove internal nodes / relationships for Bloom from get-schema tool as these have no value for a LLM
-time: 2026-03-30T12:20:34.062293+01:00

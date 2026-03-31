@@ -303,6 +303,44 @@ func (c *MockServiceNewGDSProjDropEventCall) DoAndReturn(f func() analytics.Trac
 	return c
 }
 
+// NewSchemaTimeoutFallbackEvent mocks base method.
+func (m *MockService) NewSchemaTimeoutFallbackEvent(timeoutSeconds float64, sampleSize int) analytics.TrackEvent {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NewSchemaTimeoutFallbackEvent", timeoutSeconds, sampleSize)
+	ret0, _ := ret[0].(analytics.TrackEvent)
+	return ret0
+}
+
+// NewSchemaTimeoutFallbackEvent indicates an expected call of NewSchemaTimeoutFallbackEvent.
+func (mr *MockServiceMockRecorder) NewSchemaTimeoutFallbackEvent(timeoutSeconds, sampleSize any) *MockServiceNewSchemaTimeoutFallbackEventCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewSchemaTimeoutFallbackEvent", reflect.TypeOf((*MockService)(nil).NewSchemaTimeoutFallbackEvent), timeoutSeconds, sampleSize)
+	return &MockServiceNewSchemaTimeoutFallbackEventCall{Call: call}
+}
+
+// MockServiceNewSchemaTimeoutFallbackEventCall wrap *gomock.Call
+type MockServiceNewSchemaTimeoutFallbackEventCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockServiceNewSchemaTimeoutFallbackEventCall) Return(arg0 analytics.TrackEvent) *MockServiceNewSchemaTimeoutFallbackEventCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockServiceNewSchemaTimeoutFallbackEventCall) Do(f func(float64, int) analytics.TrackEvent) *MockServiceNewSchemaTimeoutFallbackEventCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockServiceNewSchemaTimeoutFallbackEventCall) DoAndReturn(f func(float64, int) analytics.TrackEvent) *MockServiceNewSchemaTimeoutFallbackEventCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // NewStartupEvent mocks base method.
 func (m *MockService) NewStartupEvent(transportMode config.TransportMode, tlsEnabled bool, mcpServer string) analytics.TrackEvent {
 	m.ctrl.T.Helper()

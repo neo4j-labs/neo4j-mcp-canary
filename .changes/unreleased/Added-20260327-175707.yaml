@@ -1,3 +1,0 @@
-kind: Added
-body: 'refactored get-schema uses Cypher Queries to get the schema and includes vector indexes.  '
-time: 2026-03-27T17:57:07.956553Z

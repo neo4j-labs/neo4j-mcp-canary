@@ -7,7 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
+	"time"
 
 	analytics "github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics/mocks"
 	db "github.com/neo4j-labs/neo4j-mcp-canary/internal/database/mocks"
@@ -47,28 +49,6 @@ func relRecord(relType string, propName string, propTypes []string) *neo4j.Recor
 	return &neo4j.Record{
 		Keys:   []string{"relType", "propertyName", "propertyTypes"},
 		Values: []any{relType, propName, typesAny},
-	}
-}
-
-// relRecordNoProps creates a *neo4j.Record for a relationship type with no properties.
-// db.schema.relTypeProperties() returns null for propertyName and propertyTypes in this case.
-func relRecordNoProps(relType string) *neo4j.Record {
-	return &neo4j.Record{
-		Keys:   []string{"relType", "propertyName", "propertyTypes"},
-		Values: []any{relType, nil, nil},
-	}
-}
-
-// nodeRecordNoProps creates a *neo4j.Record for a node label with no properties.
-// db.schema.nodeTypeProperties() returns null for propertyName and propertyTypes in this case.
-func nodeRecordNoProps(labels []string) *neo4j.Record {
-	labelsAny := make([]any, len(labels))
-	for i, l := range labels {
-		labelsAny[i] = l
-	}
-	return &neo4j.Record{
-		Keys:   []string{"nodeLabels", "propertyName", "propertyTypes"},
-		Values: []any{labelsAny, nil, nil},
 	}
 }
 
@@ -179,6 +159,34 @@ func assertJSONEquals(t *testing.T, expected, actual string) {
 	actualFormatted, _ := json.MarshalIndent(actualData, "", "  ")
 	if string(expectedFormatted) != string(actualFormatted) {
 		t.Errorf("JSON mismatch.\nExpected:\n%s\nGot:\n%s", string(expectedFormatted), string(actualFormatted))
+	}
+}
+
+// --- Sampling record helpers ---
+
+// sampledNodeRecord creates a record matching the sampling query result format.
+// Columns: label (string), key (string), types (list of strings from valueType()).
+func sampledNodeRecord(label, key string, types []string) *neo4j.Record {
+	typesAny := make([]any, len(types))
+	for i, t := range types {
+		typesAny[i] = t
+	}
+	return &neo4j.Record{
+		Keys:   []string{"label", "key", "types"},
+		Values: []any{label, key, typesAny},
+	}
+}
+
+// sampledRelRecord creates a record matching the sampling query result format.
+// Columns: relType (string), key (string), types (list of strings from valueType()).
+func sampledRelRecord(relType, key string, types []string) *neo4j.Record {
+	typesAny := make([]any, len(types))
+	for i, t := range types {
+		typesAny[i] = t
+	}
+	return &neo4j.Record{
+		Keys:   []string{"relType", "key", "types"},
+		Values: []any{relType, key, typesAny},
 	}
 }
 
@@ -413,6 +421,276 @@ func TestGetSchemaProcessing_BloomNodesFullyExcluded(t *testing.T) {
 		"indexes": [
 			{"name": "article-id", "type": "RANGE", "entityType": "NODE", "labelsOrTypes": ["Article"], "properties": ["id"]}
 		]
+	}`, getResultText(t, result))
+}
+
+// --- Fallback (sampling) tests ---
+
+func TestGetSchemaHandler_FallbackOnTimeout(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	// Expect the schema timeout fallback analytics event
+	analyticsService.EXPECT().IsEnabled().Return(true)
+	analyticsService.EXPECT().NewSchemaTimeoutFallbackEvent(gomock.Any(), gomock.Eq(100))
+	analyticsService.EXPECT().EmitEvent(gomock.Any())
+
+	// The primary nodeProperties query fails (simulating timeout on a large graph).
+	// Then the fallback sampling queries run and succeed.
+	gomock.InOrder(
+		// 1. Primary nodeProperties query fails
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(nil, fmt.Errorf("context deadline exceeded")),
+		// 2. Fallback: sample node properties
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{
+				sampledNodeRecord("Movie", "title", []string{"STRING"}),
+				sampledNodeRecord("Movie", "released", []string{"INTEGER"}),
+				sampledNodeRecord("Person", "name", []string{"STRING"}),
+			}, nil),
+		// 3. Fallback: sample relationship properties
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{
+				sampledRelRecord("ACTED_IN", "roles", []string{"LIST<STRING>"}),
+			}, nil),
+		// 4. Fallback: sample relationship patterns
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{
+				patternRecord("Person", "ACTED_IN", "Movie"),
+			}, nil),
+		// 5. Fallback: indexes (fast metadata query)
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{}, nil),
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+		SchemaTimeout:    1 * time.Nanosecond, // Ultra-short timeout to force fallback
+		SchemaSampleSize: 100,
+	}
+
+	// Sleep to ensure the timeout context is expired before the handler checks it
+	time.Sleep(time.Millisecond)
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	assertJSONEquals(t, `{
+		"nodes": [
+			{"label": "Movie", "properties": {"title": "STRING", "released": "INTEGER"}},
+			{"label": "Person", "properties": {"name": "STRING"}}
+		],
+		"relationships": [
+			{"type": "ACTED_IN", "from": "Person", "to": "Movie", "properties": {"roles": "LIST<STRING>"}}
+		]
+	}`, getResultText(t, result))
+}
+
+func TestGetSchemaHandler_FallbackTemporalTypeNormalization(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	// Expect the schema timeout fallback analytics event
+	analyticsService.EXPECT().IsEnabled().Return(true)
+	analyticsService.EXPECT().NewSchemaTimeoutFallbackEvent(gomock.Any(), gomock.Eq(100))
+	analyticsService.EXPECT().EmitEvent(gomock.Any())
+
+	// Primary query times out, fallback uses valueType() which returns space-separated temporal types.
+	gomock.InOrder(
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(nil, fmt.Errorf("context deadline exceeded")),
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{
+				sampledNodeRecord("Event", "createdAt", []string{"ZONED DATETIME"}),
+				sampledNodeRecord("Event", "localTime", []string{"LOCAL TIME"}),
+				sampledNodeRecord("Event", "localDt", []string{"LOCAL DATETIME"}),
+				sampledNodeRecord("Event", "zonedTime", []string{"ZONED TIME"}),
+			}, nil),
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{}, nil),
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{}, nil),
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{}, nil),
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+		SchemaTimeout:    1 * time.Nanosecond,
+		SchemaSampleSize: 100,
+	}
+
+	time.Sleep(time.Millisecond)
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	// Verify that valueType() temporal types are normalized to the underscore format
+	assertJSONEquals(t, `{
+		"nodes": [{
+			"label": "Event",
+			"properties": {
+				"createdAt": "DATE_TIME",
+				"localTime": "LOCAL_TIME",
+				"localDt": "LOCAL_DATE_TIME",
+				"zonedTime": "ZONED_TIME"
+			}
+		}]
+	}`, getResultText(t, result))
+}
+
+func TestGetSchemaHandler_NoFallbackWhenTimeoutDisabled(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	// With SchemaTimeout = 0, no timeout is applied. A query failure is treated as a hard error.
+	mockDB.EXPECT().
+		ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, errors.New("connection refused"))
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+		SchemaTimeout:    0, // Timeout disabled
+		SchemaSampleSize: 100,
+	}
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+
+	if err != nil {
+		t.Fatalf("expected no error from handler, got: %v", err)
+	}
+	if result == nil || !result.IsError {
+		t.Fatal("expected error result when timeout is disabled and query fails")
+	}
+}
+
+func TestGetSchemaHandler_PrimarySucceedsWithinTimeout(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	// Primary queries succeed within the timeout — fallback should NOT be triggered.
+	expectFourQueries(mockDB,
+		[]*neo4j.Record{
+			nodeRecord([]string{"Movie"}, "title", []string{"String"}),
+		},
+		[]*neo4j.Record{},
+		[]*neo4j.Record{},
+		[]*neo4j.Record{},
+		nil, nil, nil, nil,
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+		SchemaTimeout:    30 * time.Second, // Generous timeout
+		SchemaSampleSize: 100,
+	}
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	assertJSONEquals(t, `{
+		"nodes": [{"label": "Movie", "properties": {"title": "STRING"}}]
+	}`, getResultText(t, result))
+}
+
+func TestGetSchemaHandler_FallbackHeterogeneousTypes(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	// Expect the schema timeout fallback analytics event
+	analyticsService.EXPECT().IsEnabled().Return(true)
+	analyticsService.EXPECT().NewSchemaTimeoutFallbackEvent(gomock.Any(), gomock.Eq(100))
+	analyticsService.EXPECT().EmitEvent(gomock.Any())
+
+	// Sampling discovers a property with multiple types (heterogeneous data).
+	gomock.InOrder(
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(nil, fmt.Errorf("context deadline exceeded")),
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{
+				sampledNodeRecord("Thing", "value", []string{"STRING", "INTEGER"}),
+			}, nil),
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{}, nil),
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{}, nil),
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{}, nil),
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+		SchemaTimeout:    1 * time.Nanosecond,
+		SchemaSampleSize: 100,
+	}
+
+	time.Sleep(time.Millisecond)
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	// Heterogeneous types should be joined with " | " and sorted
+	assertJSONEquals(t, `{
+		"nodes": [{"label": "Thing", "properties": {"value": "INTEGER | STRING"}}]
 	}`, getResultText(t, result))
 }
 
@@ -934,6 +1212,42 @@ func TestGetSchemaProcessing(t *testing.T) {
 			expectedJSON: `{
 				"nodes": [{"label": "Movie", "properties": {"title": "STRING"}}],
 				"indexes": [{"name": "mixed-fulltext", "type": "FULLTEXT", "entityType": "NODE", "labelsOrTypes": ["Movie", "_Bloom_Perspective_"], "properties": ["name"]}]
+			}`,
+		},
+		{
+			name: "full-text indexes on nodes and relationships",
+			nodeRecords: []*neo4j.Record{
+				nodeRecord([]string{"Article"}, "title", []string{"String"}),
+				nodeRecord([]string{"Article"}, "body", []string{"String"}),
+				nodeRecord([]string{"Comment"}, "text", []string{"String"}),
+			},
+			relRecords: []*neo4j.Record{
+				relRecord(":`HAS_COMMENT`", "content", []string{"String"}),
+			},
+			patternRecords: []*neo4j.Record{
+				patternRecord("Article", "HAS_COMMENT", "Comment"),
+			},
+			indexRecords: []*neo4j.Record{
+				indexRecord("article-fulltext", "FULLTEXT", "NODE",
+					[]string{"Article"}, []string{"title", "body"}, map[string]any{}),
+				indexRecord("comment-fulltext", "FULLTEXT", "NODE",
+					[]string{"Comment"}, []string{"text"}, map[string]any{}),
+				indexRecord("rel-fulltext", "FULLTEXT", "RELATIONSHIP",
+					[]string{"HAS_COMMENT"}, []string{"content"}, map[string]any{}),
+			},
+			expectedJSON: `{
+				"nodes": [
+					{"label": "Article", "properties": {"title": "STRING", "body": "STRING"}},
+					{"label": "Comment", "properties": {"text": "STRING"}}
+				],
+				"relationships": [
+					{"type": "HAS_COMMENT", "from": "Article", "to": "Comment", "properties": {"content": "STRING"}}
+				],
+				"indexes": [
+					{"name": "article-fulltext", "type": "FULLTEXT", "entityType": "NODE", "labelsOrTypes": ["Article"], "properties": ["title", "body"]},
+					{"name": "comment-fulltext", "type": "FULLTEXT", "entityType": "NODE", "labelsOrTypes": ["Comment"], "properties": ["text"]},
+					{"name": "rel-fulltext", "type": "FULLTEXT", "entityType": "RELATIONSHIP", "labelsOrTypes": ["HAS_COMMENT"], "properties": ["content"]}
+				]
 			}`,
 		},
 		{

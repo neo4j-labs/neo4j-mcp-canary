@@ -68,6 +68,9 @@ type ToolVectorInfo struct {
 	// VectorPropertySet indicates whether the Cypher query sets vector properties
 	// (e.g. db.create.setNodeVectorProperty, db.create.setRelationshipVectorProperty).
 	VectorPropertySet *bool `json:"vectorPropertySet,omitempty"`
+	// FullTextSearch indicates whether the Cypher query uses full-text index search
+	// (e.g. db.index.fulltext.queryNodes, db.index.fulltext.queryRelationships).
+	FullTextSearch *bool `json:"fullTextSearch,omitempty"`
 }
 
 // toolProperties contains tool event properties (used for both STDIO and HTTP modes)
@@ -80,6 +83,7 @@ type toolProperties struct {
 	FullTextIndexCount *int   `json:"fullTextIndex,omitempty"`
 	VectorSearch       *bool  `json:"vectorSearch,omitempty"`
 	VectorPropertySet  *bool  `json:"vectorPropertySet,omitempty"`
+	FullTextSearch     *bool  `json:"fullTextSearch,omitempty"`
 }
 
 type TrackEvent struct {
@@ -154,10 +158,31 @@ func (a *Analytics) NewToolEvent(toolsUsed string, success bool, vectorInfo *Too
 		props.FullTextIndexCount = vectorInfo.FullTextIndexCount
 		props.VectorSearch = vectorInfo.VectorSearch
 		props.VectorPropertySet = vectorInfo.VectorPropertySet
+		props.FullTextSearch = vectorInfo.FullTextSearch
 	}
 	return TrackEvent{
 		Event:      strings.Join([]string{eventNamePrefix, "TOOL_USED"}, "_"),
 		Properties: props,
+	}
+}
+
+// schemaTimeoutFallbackProperties contains properties for schema timeout fallback events.
+type schemaTimeoutFallbackProperties struct {
+	baseProperties
+	TimeoutSeconds float64 `json:"timeout_seconds"`
+	SampleSize     int     `json:"sample_size"`
+}
+
+// NewSchemaTimeoutFallbackEvent creates an event recording that get-schema timed out
+// and fell back to the sampling-based approach.
+func (a *Analytics) NewSchemaTimeoutFallbackEvent(timeoutSeconds float64, sampleSize int) TrackEvent {
+	return TrackEvent{
+		Event: strings.Join([]string{eventNamePrefix, "SCHEMA_TIMEOUT_FALLBACK"}, "_"),
+		Properties: schemaTimeoutFallbackProperties{
+			baseProperties: a.getBaseProperties(),
+			TimeoutSeconds: timeoutSeconds,
+			SampleSize:     sampleSize,
+		},
 	}
 }
 

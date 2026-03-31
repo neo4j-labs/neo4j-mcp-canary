@@ -17,6 +17,9 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
 
+// DefaultFallbackSampleSize is used when SchemaSampleSize is not configured.
+const DefaultFallbackSampleSize = 1000
+
 const (
 	// nodePropertiesQuery retrieves property information for all node labels.
 	// Uses the built-in db.schema.nodeTypeProperties() procedure (available since Neo4j 3.4).
@@ -42,6 +45,40 @@ const (
 		SHOW INDEXES
 		YIELD name, type, entityType, labelsOrTypes, properties, state, options
 		WHERE state = 'ONLINE' AND type <> 'LOOKUP'`
+
+	// --- Sampling-based fallback queries (Spark-connector inspired) ---
+	// These are used when the primary db.schema procedures time out on large graphs.
+	// Instead of scanning all data via procedures, they sample a limited number of
+	// records and infer the schema from actual property values using valueType() (Neo4j 5.x+).
+
+	// sampleNodePropertiesQuery samples nodes and infers property names and types.
+	sampleNodePropertiesQuery = `
+		MATCH (n)
+		WITH n LIMIT $sampleSize
+		UNWIND labels(n) AS label
+		UNWIND keys(n) AS key
+		WITH label, key, valueType(n[key]) AS propType
+		RETURN label, key, collect(DISTINCT propType) AS types
+		ORDER BY label, key`
+
+	// sampleRelPropertiesQuery samples relationships and infers property names and types.
+	sampleRelPropertiesQuery = `
+		MATCH ()-[r]->()
+		WITH r LIMIT $sampleSize
+		WITH type(r) AS relType, r
+		UNWIND keys(r) AS key
+		WITH relType, key, valueType(r[key]) AS propType
+		RETURN relType, key, collect(DISTINCT propType) AS types
+		ORDER BY relType, key`
+
+	// sampleRelPatternsQuery samples relationships to discover (fromLabel, relType, toLabel) patterns.
+	sampleRelPatternsQuery = `
+		MATCH (a)-[r]->(b)
+		WITH a, r, b LIMIT $sampleSize
+		UNWIND labels(a) AS fromLabel
+		UNWIND labels(b) AS toLabel
+		WITH DISTINCT fromLabel, type(r) AS relType, toLabel
+		RETURN fromLabel, relType, toLabel`
 )
 
 // --- Output types ---
@@ -91,6 +128,11 @@ func GetSchemaHandler(deps *tools.ToolDependencies, schemaSampleSize int32) func
 
 // handleGetSchema retrieves Neo4j schema information using built-in Cypher procedures,
 // removing the dependency on the APOC library.
+//
+// When SchemaTimeout is configured (> 0), the primary schema procedures
+// (db.schema.nodeTypeProperties / relTypeProperties) are executed with a timeout.
+// If they exceed the deadline, the handler falls back to a Spark-connector-inspired
+// sampling approach that infers the schema from a limited number of records.
 func handleGetSchema(ctx context.Context, deps *tools.ToolDependencies) (*mcp.CallToolResult, error) {
 	if deps.DBService == nil {
 		errMessage := "database service is not initialized"
@@ -100,16 +142,37 @@ func handleGetSchema(ctx context.Context, deps *tools.ToolDependencies) (*mcp.Ca
 
 	slog.Info("retrieving schema from the database")
 
+	// Create a child context with a timeout for the primary schema queries.
+	// If the timeout is 0 (disabled), use the parent context as-is.
+	var schemaCtx context.Context
+	var cancel context.CancelFunc
+	if deps.SchemaTimeout > 0 {
+		schemaCtx, cancel = context.WithTimeout(ctx, deps.SchemaTimeout)
+		defer cancel()
+	} else {
+		schemaCtx = ctx
+	}
+
 	// Step 1: Fetch node properties via db.schema.nodeTypeProperties()
-	nodeRecords, err := deps.DBService.ExecuteReadQuery(ctx, nodePropertiesQuery, map[string]any{})
+	nodeRecords, err := deps.DBService.ExecuteReadQuery(schemaCtx, nodePropertiesQuery, map[string]any{})
 	if err != nil {
+		if schemaCtx.Err() == context.DeadlineExceeded {
+			slog.Warn("primary schema query timed out, falling back to sampling approach",
+				"timeout", deps.SchemaTimeout, "phase", "nodeProperties")
+			return handleGetSchemaFallback(ctx, deps)
+		}
 		slog.Error("failed to fetch node type properties", "error", err)
 		return mcp.NewToolResultError(fmt.Sprintf("failed to retrieve node schema: %s", err.Error())), nil
 	}
 
 	// Step 2: Fetch relationship properties via db.schema.relTypeProperties()
-	relRecords, err := deps.DBService.ExecuteReadQuery(ctx, relPropertiesQuery, map[string]any{})
+	relRecords, err := deps.DBService.ExecuteReadQuery(schemaCtx, relPropertiesQuery, map[string]any{})
 	if err != nil {
+		if schemaCtx.Err() == context.DeadlineExceeded {
+			slog.Warn("primary schema query timed out, falling back to sampling approach",
+				"timeout", deps.SchemaTimeout, "phase", "relProperties")
+			return handleGetSchemaFallback(ctx, deps)
+		}
 		slog.Error("failed to fetch relationship type properties", "error", err)
 		return mcp.NewToolResultError(fmt.Sprintf("failed to retrieve relationship schema: %s", err.Error())), nil
 	}
@@ -139,6 +202,86 @@ func handleGetSchema(ctx context.Context, deps *tools.ToolDependencies) (*mcp.Ca
 	if err != nil {
 		slog.Error("failed to process schema", "error", err)
 		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	jsonData, err := json.Marshal(response)
+	if err != nil {
+		slog.Error("failed to serialize schema", "error", err)
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return mcp.NewToolResultText(string(jsonData)), nil
+}
+
+// handleGetSchemaFallback uses a Spark-connector-inspired sampling approach to infer
+// the schema from a limited number of records. This avoids the full-scan behaviour of
+// db.schema.nodeTypeProperties() / relTypeProperties() which can time out on large graphs.
+// Property types are inferred using the valueType() function (Neo4j 5.x+).
+func handleGetSchemaFallback(ctx context.Context, deps *tools.ToolDependencies) (*mcp.CallToolResult, error) {
+	sampleSize := deps.SchemaSampleSize
+	if sampleSize <= 0 {
+		sampleSize = DefaultFallbackSampleSize
+	}
+
+	slog.Info("using sampling-based schema inference (fallback)", "sampleSize", sampleSize)
+
+	// Emit analytics event to record the timeout fallback
+	if deps.AnalyticsService != nil && deps.AnalyticsService.IsEnabled() {
+		timeoutSeconds := deps.SchemaTimeout.Seconds()
+		deps.AnalyticsService.EmitEvent(
+			deps.AnalyticsService.NewSchemaTimeoutFallbackEvent(timeoutSeconds, sampleSize),
+		)
+	}
+
+	params := map[string]any{"sampleSize": int64(sampleSize)}
+
+	// Step 1: Sample node properties
+	nodeRecords, err := deps.DBService.ExecuteReadQuery(ctx, sampleNodePropertiesQuery, params)
+	if err != nil {
+		slog.Error("failed to fetch sampled node properties", "error", err)
+		return mcp.NewToolResultError(fmt.Sprintf("failed to retrieve node schema via sampling: %s", err.Error())), nil
+	}
+
+	// Step 2: Sample relationship properties
+	relRecords, err := deps.DBService.ExecuteReadQuery(ctx, sampleRelPropertiesQuery, params)
+	if err != nil {
+		slog.Error("failed to fetch sampled relationship properties", "error", err)
+		return mcp.NewToolResultError(fmt.Sprintf("failed to retrieve relationship schema via sampling: %s", err.Error())), nil
+	}
+
+	// Empty database
+	if len(nodeRecords) == 0 && len(relRecords) == 0 {
+		slog.Warn("schema is empty, no data in the database")
+		return mcp.NewToolResultText("The get-schema tool executed successfully; however, since the Neo4j instance contains no data, no schema information was returned."), nil
+	}
+
+	// Step 3: Process sampled results into the same property map format
+	nodeProps := processSampledNodeProperties(nodeRecords)
+	relProps := processSampledRelProperties(relRecords)
+
+	// Step 4: Sample relationship patterns (graceful degradation on failure)
+	patternRecords, err := deps.DBService.ExecuteReadQuery(ctx, sampleRelPatternsQuery, params)
+	if err != nil {
+		slog.Warn("failed to fetch relationship patterns via sampling, continuing without", "error", err)
+		patternRecords = nil
+	}
+
+	// Step 5: Fetch indexes — this is a fast metadata query, not a data scan
+	indexRecords, err := deps.DBService.ExecuteReadQuery(ctx, indexesQuery, map[string]any{})
+	if err != nil {
+		slog.Warn("failed to fetch indexes, continuing without index information", "error", err)
+		indexRecords = nil
+	}
+
+	// Step 6: Assemble using the same building functions as the primary path
+	nodes := buildNodeSchemas(nodeProps)
+	relationships := buildRelSchemas(relProps, patternRecords)
+	indexes := processIndexes(indexRecords)
+
+	response := &SchemaResponse{
+		Nodes:         nodes,
+		Relationships: relationships,
+		Indexes:       indexes,
 	}
 
 	jsonData, err := json.Marshal(response)
@@ -484,6 +627,124 @@ func extractVectorConfig(info *IndexInfo, optionsRaw any) {
 	}
 	if simFunc, ok := indexConfig["vector.similarity_function"].(string); ok {
 		info.SimilarityFunction = &simFunc
+	}
+}
+
+// --- Sampling processors ---
+
+// processSampledNodeProperties builds the label → property → type map from sampling query results.
+// Each record has columns: label (string), key (string), types (list of strings from valueType()).
+func processSampledNodeProperties(records []*neo4j.Record) map[string]map[string]string {
+	nodeMap := make(map[string]map[string]string)
+
+	for _, record := range records {
+		labelRaw, ok := record.Get("label")
+		if !ok {
+			continue
+		}
+		keyRaw, ok := record.Get("key")
+		if !ok {
+			continue
+		}
+		typesRaw, ok := record.Get("types")
+		if !ok {
+			continue
+		}
+
+		label, ok := labelRaw.(string)
+		if !ok {
+			continue
+		}
+		key, ok := keyRaw.(string)
+		if !ok {
+			continue
+		}
+
+		if nodeMap[label] == nil {
+			nodeMap[label] = make(map[string]string)
+		}
+
+		nodeMap[label][key] = normalizeValueTypes(typesRaw)
+	}
+
+	return nodeMap
+}
+
+// processSampledRelProperties builds the relType → property → type map from sampling query results.
+// Each record has columns: relType (string), key (string), types (list of strings from valueType()).
+func processSampledRelProperties(records []*neo4j.Record) map[string]map[string]string {
+	relMap := make(map[string]map[string]string)
+
+	for _, record := range records {
+		relTypeRaw, ok := record.Get("relType")
+		if !ok {
+			continue
+		}
+		keyRaw, ok := record.Get("key")
+		if !ok {
+			continue
+		}
+		typesRaw, ok := record.Get("types")
+		if !ok {
+			continue
+		}
+
+		relType, ok := relTypeRaw.(string)
+		if !ok {
+			continue
+		}
+		key, ok := keyRaw.(string)
+		if !ok {
+			continue
+		}
+
+		if relMap[relType] == nil {
+			relMap[relType] = make(map[string]string)
+		}
+
+		relMap[relType][key] = normalizeValueTypes(typesRaw)
+	}
+
+	return relMap
+}
+
+// normalizeValueTypes converts a list of valueType() strings into the same format
+// used by the primary schema path. When multiple types are observed, they are joined with " | ".
+func normalizeValueTypes(raw any) string {
+	types, ok := toStringSlice(raw)
+	if !ok || len(types) == 0 {
+		return "ANY"
+	}
+
+	normalized := make([]string, 0, len(types))
+	for _, t := range types {
+		normalized = append(normalized, normalizeValueType(t))
+	}
+
+	if len(normalized) == 1 {
+		return normalized[0]
+	}
+
+	sort.Strings(normalized)
+	return strings.Join(normalized, " | ")
+}
+
+// normalizeValueType maps valueType() output to the format used by the primary schema path.
+// valueType() returns standardized Cypher type names (Neo4j 5.x+) such as "STRING", "INTEGER",
+// "ZONED DATETIME", "LIST<FLOAT>", etc. Most pass through unchanged; only the temporal types
+// with spaces need mapping to the underscore-separated format.
+func normalizeValueType(t string) string {
+	switch t {
+	case "ZONED DATETIME":
+		return "DATE_TIME"
+	case "LOCAL DATETIME":
+		return "LOCAL_DATE_TIME"
+	case "LOCAL TIME":
+		return "LOCAL_TIME"
+	case "ZONED TIME":
+		return "ZONED_TIME"
+	default:
+		return t
 	}
 }
 
