@@ -88,9 +88,7 @@ func TestNeo4jMCPServerHTTPMode(t *testing.T) {
 	t.Run("Server triggers verification on first initialize request", func(t *testing.T) {
 		mockDB := db.NewMockService(ctrl)
 		mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), checkApocMetaSchemaQuery, gomock.Any()).Times(1).Return(apocAvailableRecord(true), nil)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(gdsVersionRecord("2.22.0"), nil)
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), vectorIndexCountQuery, gomock.Any()).Times(1).Return(vectorIndexCountRecord(0), nil)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
 
 		s, errChan := createHTTPServer(t, cfg, mockDB, analyticsService)
@@ -126,9 +124,7 @@ func TestNeo4jMCPServerHTTPMode(t *testing.T) {
 		// as an authentication mechanism as it cannot return valid errors to the users.
 		mockDB := db.NewMockService(ctrl)
 		mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), checkApocMetaSchemaQuery, gomock.Any()).Times(1).Return(apocAvailableRecord(true), nil)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(gdsVersionRecord("2.22.0"), nil)
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), vectorIndexCountQuery, gomock.Any()).Times(1).Return(vectorIndexCountRecord(0), nil)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
 
 		s, errChan := createHTTPServer(t, cfg, mockDB, analyticsService)
@@ -150,9 +146,7 @@ func TestNeo4jMCPServerHTTPMode(t *testing.T) {
 	t.Run("server creates successfully with all required components", func(t *testing.T) {
 		mockDB := db.NewMockService(ctrl)
 		mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), checkApocMetaSchemaQuery, gomock.Any()).Times(1).Return(apocAvailableRecord(true), nil)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(gdsVersionRecord("2.22.0"), nil)
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), vectorIndexCountQuery, gomock.Any()).Times(1).Return(vectorIndexCountRecord(0), nil)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
 
 		s, errChan := createHTTPServer(t, cfg, mockDB, analyticsService)
@@ -175,9 +169,7 @@ func TestNeo4jMCPServerHTTPMode(t *testing.T) {
 	t.Run("server should not add GDS tools when GDS is not installed", func(t *testing.T) {
 		mockDB := db.NewMockService(ctrl)
 		mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), checkApocMetaSchemaQuery, gomock.Any()).Times(1).Return(apocAvailableRecord(true), nil)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(nil, fmt.Errorf("Unknown function 'gds.version'"))
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), vectorIndexCountQuery, gomock.Any()).Times(1).Return(vectorIndexCountRecord(0), nil)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
 
 		s, errChan := createHTTPServer(t, cfg, mockDB, analyticsService)

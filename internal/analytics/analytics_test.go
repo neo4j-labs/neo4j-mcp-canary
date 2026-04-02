@@ -290,8 +290,10 @@ func TestEventCreation(t *testing.T) {
 	})
 
 	t.Run("NewToolEvent with vector property set for write-cypher", func(t *testing.T) {
+		vectorSearch := false
 		vectorPropertySet := true
 		vectorInfo := &analytics.ToolVectorInfo{
+			VectorSearch:      &vectorSearch,
 			VectorPropertySet: &vectorPropertySet,
 		}
 		event := analyticsService.NewToolEvent("write-cypher", true, vectorInfo)

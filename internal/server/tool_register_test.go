@@ -140,110 +140,17 @@ func TestToolRegister(t *testing.T) {
 		}
 	})
 
-	t.Run("should register vector-search tool when vector indexes are found", func(t *testing.T) {
-		mockDB := getMockedDBServiceFull(ctrl, true, true)
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
-		cfg := &config.Config{
-			URI:           "bolt://test-host:7687",
-			Username:      "neo4j",
-			Password:      "password",
-			Database:      "neo4j",
-			TransportMode: config.TransportModeStdio,
-		}
-		s := server.NewNeo4jMCPServer("test-version", cfg, mockDB, aService)
-
-		// Expected tools that should be registered
-		// All tools + vector: get-schema, read-cypher, write-cypher, list-gds-procedures, vector-search
-		expectedTotalToolsCount := 5
-
-		err := s.Start()
-		if err != nil {
-			t.Fatalf("Start() failed: %v", err)
-		}
-		registeredTools := len(s.MCPServer.ListTools())
-
-		if expectedTotalToolsCount != registeredTools {
-			t.Errorf("Expected %d tools, but test configuration shows %d", expectedTotalToolsCount, registeredTools)
-		}
-	})
-
-	t.Run("should not register vector-search tool when no vector indexes are found", func(t *testing.T) {
-		mockDB := getMockedDBServiceFull(ctrl, true, false)
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
-		cfg := &config.Config{
-			URI:           "bolt://test-host:7687",
-			Username:      "neo4j",
-			Password:      "password",
-			Database:      "neo4j",
-			TransportMode: config.TransportModeStdio,
-		}
-		s := server.NewNeo4jMCPServer("test-version", cfg, mockDB, aService)
-
-		// Expected tools that should be registered
-		// All tools minus vector: get-schema, read-cypher, write-cypher, list-gds-procedures
-		expectedTotalToolsCount := 4
-
-		err := s.Start()
-		if err != nil {
-			t.Fatalf("Start() failed: %v", err)
-		}
-		registeredTools := len(s.MCPServer.ListTools())
-
-		if expectedTotalToolsCount != registeredTools {
-			t.Errorf("Expected %d tools, but test configuration shows %d", expectedTotalToolsCount, registeredTools)
-		}
-	})
-
-	t.Run("should register vector-search tool in readonly mode when vector indexes exist", func(t *testing.T) {
-		mockDB := getMockedDBServiceFull(ctrl, true, true)
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
-		cfg := &config.Config{
-			URI:           "bolt://test-host:7687",
-			Username:      "neo4j",
-			Password:      "password",
-			Database:      "neo4j",
-			ReadOnly:      true,
-			TransportMode: config.TransportModeStdio,
-		}
-		s := server.NewNeo4jMCPServer("test-version", cfg, mockDB, aService)
-
-		// Expected tools that should be registered
-		// Readonly + vector: get-schema, read-cypher, list-gds-procedures, vector-search
-		expectedTotalToolsCount := 4
-
-		err := s.Start()
-		if err != nil {
-			t.Fatalf("Start() failed: %v", err)
-		}
-		registeredTools := len(s.MCPServer.ListTools())
-
-		if expectedTotalToolsCount != registeredTools {
-			t.Errorf("Expected %d tools, but test configuration shows %d", expectedTotalToolsCount, registeredTools)
-		}
-	})
 }
 
 // getMockedDBService returns a mock DB service with the standard verifyRequirements expectations set up.
 func getMockedDBService(ctrl *gomock.Controller, withGDS bool) *db.MockService {
-	return getMockedDBServiceFull(ctrl, withGDS, false)
-}
-
-// getMockedDBServiceFull returns a mock DB service with full control over GDS and vector index availability.
-func getMockedDBServiceFull(ctrl *gomock.Controller, withGDS bool, withVectorIndexes bool) *db.MockService {
 	mockDB := db.NewMockService(ctrl)
 	mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
-	mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), checkApocMetaSchemaQuery, gomock.Any()).Times(1).Return(apocAvailableRecord(true), nil)
 
 	if withGDS {
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(gdsVersionRecord("2.22.0"), nil)
 	} else {
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(nil, fmt.Errorf("Unknown function 'gds.version'"))
-	}
-
-	if withVectorIndexes {
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), vectorIndexCountQuery, gomock.Any()).Times(1).Return(vectorIndexCountRecord(2), nil)
-	} else {
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), vectorIndexCountQuery, gomock.Any()).Times(1).Return(vectorIndexCountRecord(0), nil)
 	}
 
 	return mockDB
