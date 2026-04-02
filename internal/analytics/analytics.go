@@ -95,7 +95,7 @@ func NewAnalyticsWithClient(mixPanelToken string, mixpanelEndpoint string, clien
 // With multiDB, this could be either databases.neo4j.io or instances.neo4j.io
 func isAura(uri string) bool {
 	// Regex to detect our URI of interest
-	re := regexp.MustCompile(`(databases|instances)\.neo4j\.io`)
+	re := regexp.MustCompile(`(databases|instances)\.neo4j\.io\b`)
 
 	if re.MatchString(uri) {
 		// contains a neo4j.io database or instance URL
