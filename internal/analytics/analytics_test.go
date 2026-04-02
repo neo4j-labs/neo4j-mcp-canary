@@ -204,8 +204,8 @@ func TestEventCreation(t *testing.T) {
 		assertBaseProperties(t, event.Properties)
 	})
 
-	t.Run("NewToolEvent", func(t *testing.T) {
-		event := analyticsService.NewToolEvent("gds", true)
+	t.Run("NewToolEvent without vector info", func(t *testing.T) {
+		event := analyticsService.NewToolEvent("gds", true, nil)
 		if event.Event != "MCP-NEO4J-CANARY_TOOL_USED" {
 			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP-NEO4J-CANARY_TOOL_USED")
 		}
@@ -216,7 +216,141 @@ func TestEventCreation(t *testing.T) {
 		if props["success"] != true {
 			t.Errorf("unexpected success: got %v, want %v", props["success"], true)
 		}
-		// Note: Neo4j connection info (version, edition, cypher version) is sent separately in CONNECTION_INITIALIZED event
+		// Vector properties should not be present when vectorInfo is nil
+		if _, exists := props["vectorIndex"]; exists {
+			t.Errorf("vectorIndex should not be present when vectorInfo is nil")
+		}
+		if _, exists := props["vectorSearch"]; exists {
+			t.Errorf("vectorSearch should not be present when vectorInfo is nil")
+		}
+		if _, exists := props["vectorPropertySet"]; exists {
+			t.Errorf("vectorPropertySet should not be present when vectorInfo is nil")
+		}
+	})
+
+	t.Run("NewToolEvent with vector index count for get-schema", func(t *testing.T) {
+		count := 3
+		vectorInfo := &analytics.ToolVectorInfo{
+			VectorIndexCount: &count,
+		}
+		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo)
+		props := assertBaseProperties(t, event.Properties)
+		if props["tools_used"] != "get-schema" {
+			t.Errorf("unexpected tools_used: got %v, want %v", props["tools_used"], "get-schema")
+		}
+		if props["vectorIndex"] != float64(3) {
+			t.Errorf("unexpected vectorIndex: got %v, want %v", props["vectorIndex"], 3)
+		}
+		// vectorSearch and vectorPropertySet should not be present
+		if _, exists := props["vectorSearch"]; exists {
+			t.Errorf("vectorSearch should not be present for get-schema")
+		}
+	})
+
+	t.Run("NewToolEvent with zero vector indexes for get-schema", func(t *testing.T) {
+		count := 0
+		vectorInfo := &analytics.ToolVectorInfo{
+			VectorIndexCount: &count,
+		}
+		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo)
+		props := assertBaseProperties(t, event.Properties)
+		// Even with 0, the field should be present since the pointer is non-nil
+		if props["vectorIndex"] != float64(0) {
+			t.Errorf("unexpected vectorIndex: got %v, want %v", props["vectorIndex"], 0)
+		}
+	})
+
+	t.Run("NewToolEvent with fulltext index count for get-schema", func(t *testing.T) {
+		vectorCount := 2
+		fulltextCount := 5
+		vectorInfo := &analytics.ToolVectorInfo{
+			VectorIndexCount:   &vectorCount,
+			FullTextIndexCount: &fulltextCount,
+		}
+		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo)
+		props := assertBaseProperties(t, event.Properties)
+		if props["vectorIndex"] != float64(2) {
+			t.Errorf("unexpected vectorIndex: got %v, want %v", props["vectorIndex"], 2)
+		}
+		if props["fullTextIndex"] != float64(5) {
+			t.Errorf("unexpected fullTextIndex: got %v, want %v", props["fullTextIndex"], 5)
+		}
+	})
+
+	t.Run("NewToolEvent without fulltext index count omits field", func(t *testing.T) {
+		vectorCount := 1
+		vectorInfo := &analytics.ToolVectorInfo{
+			VectorIndexCount: &vectorCount,
+		}
+		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo)
+		props := assertBaseProperties(t, event.Properties)
+		if _, exists := props["fullTextIndex"]; exists {
+			t.Errorf("fullTextIndex should not be present when not set")
+		}
+	})
+
+	t.Run("NewToolEvent with vector property set for write-cypher", func(t *testing.T) {
+		vectorPropertySet := true
+		vectorInfo := &analytics.ToolVectorInfo{
+			VectorPropertySet: &vectorPropertySet,
+		}
+		event := analyticsService.NewToolEvent("write-cypher", true, vectorInfo)
+		props := assertBaseProperties(t, event.Properties)
+		if props["vectorSearch"] != false {
+			t.Errorf("unexpected vectorSearch: got %v, want %v", props["vectorSearch"], false)
+		}
+		if props["vectorPropertySet"] != true {
+			t.Errorf("unexpected vectorPropertySet: got %v, want %v", props["vectorPropertySet"], true)
+		}
+	})
+
+	t.Run("NewToolEvent with full-text search for read-cypher", func(t *testing.T) {
+		fullTextSearch := true
+		vectorInfo := &analytics.ToolVectorInfo{
+			FullTextSearch: &fullTextSearch,
+		}
+		event := analyticsService.NewToolEvent("read-cypher", true, vectorInfo)
+		props := assertBaseProperties(t, event.Properties)
+		if props["fullTextSearch"] != true {
+			t.Errorf("unexpected fullTextSearch: got %v, want %v", props["fullTextSearch"], true)
+		}
+	})
+
+	t.Run("NewToolEvent without full-text search omits field", func(t *testing.T) {
+		vectorCount := 1
+		vectorInfo := &analytics.ToolVectorInfo{
+			VectorIndexCount: &vectorCount,
+		}
+		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo)
+		props := assertBaseProperties(t, event.Properties)
+		if _, exists := props["fullTextSearch"]; exists {
+			t.Errorf("fullTextSearch should not be present when not set")
+		}
+	})
+
+	t.Run("NewSchemaTimeoutFallbackEvent", func(t *testing.T) {
+		event := analyticsService.NewSchemaTimeoutFallbackEvent(30.0, 1000)
+		if event.Event != "MCP-NEO4J-CANARY_SCHEMA_TIMEOUT_FALLBACK" {
+			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP-NEO4J-CANARY_SCHEMA_TIMEOUT_FALLBACK")
+		}
+		props := assertBaseProperties(t, event.Properties)
+		if props["timeout_seconds"] != float64(30) {
+			t.Errorf("unexpected timeout_seconds: got %v, want %v", props["timeout_seconds"], 30)
+		}
+		if props["sample_size"] != float64(1000) {
+			t.Errorf("unexpected sample_size: got %v, want %v", props["sample_size"], 1000)
+		}
+	})
+
+	t.Run("NewSchemaTimeoutFallbackEvent with custom values", func(t *testing.T) {
+		event := analyticsService.NewSchemaTimeoutFallbackEvent(45.5, 500)
+		props := assertBaseProperties(t, event.Properties)
+		if props["timeout_seconds"] != 45.5 {
+			t.Errorf("unexpected timeout_seconds: got %v, want %v", props["timeout_seconds"], 45.5)
+		}
+		if props["sample_size"] != float64(500) {
+			t.Errorf("unexpected sample_size: got %v, want %v", props["sample_size"], 500)
+		}
 	})
 
 	t.Run("NewStartupEvent", func(t *testing.T) {

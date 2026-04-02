@@ -26,6 +26,7 @@ type Service interface {
 	NewGDSProjDropEvent() TrackEvent
 	NewStartupEvent(transportMode config.TransportMode, tlsEnabled bool, mcpServer string) TrackEvent
 	NewConnectionInitializedEvent(connInfo ConnectionEventInfo) TrackEvent
-	NewToolEvent(toolsUsed string, success bool) TrackEvent
+	NewToolEvent(toolsUsed string, success bool, vectorInfo *ToolVectorInfo) TrackEvent
+	NewSchemaTimeoutFallbackEvent(timeoutSeconds float64, sampleSize int) TrackEvent
 	NewUnauthenticatedJsonRpcEvent(jsonRpcRequest string) TrackEvent
 }

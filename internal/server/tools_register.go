@@ -4,6 +4,8 @@
 package server
 
 import (
+	"time"
+
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/cypher"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/gds"
@@ -39,10 +41,7 @@ type ToolDefinition struct {
 }
 
 func (s *Neo4jMCPServer) addGDSTools() {
-	deps := &tools.ToolDependencies{
-		DBService:        s.dbService,
-		AnalyticsService: s.anService,
-	}
+	deps := s.buildToolDependencies()
 	toolDefs := s.getAllToolsDefs(deps)
 	toolDefinition := make([]server.ServerTool, 0)
 	GDSTools := make([]ToolDefinition, 0, len(toolDefs))
@@ -68,10 +67,8 @@ func (s *Neo4jMCPServer) getEnabledTools() []server.ServerTool {
 	if !s.gdsInstalled {
 		filters = append(filters, filterGDSTools)
 	}
-	deps := &tools.ToolDependencies{
-		DBService:        s.dbService,
-		AnalyticsService: s.anService,
-	}
+
+	deps := s.buildToolDependencies()
 	toolDefs := s.getAllToolsDefs(deps)
 
 	for _, filter := range filters {
@@ -102,6 +99,16 @@ func filterGDSTools(tools []ToolDefinition) []ToolDefinition {
 		}
 	}
 	return nonGDSTools
+}
+
+// buildToolDependencies creates a ToolDependencies with all config wired through.
+func (s *Neo4jMCPServer) buildToolDependencies() *tools.ToolDependencies {
+	return &tools.ToolDependencies{
+		DBService:        s.dbService,
+		AnalyticsService: s.anService,
+		SchemaSampleSize: int(s.config.SchemaSampleSize),
+		SchemaTimeout:    time.Duration(s.config.SchemaTimeoutSeconds) * time.Second,
+	}
 }
 
 // getAllToolsDefs returns all available tools with their specs and handlers

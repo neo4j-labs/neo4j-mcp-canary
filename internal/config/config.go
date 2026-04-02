@@ -18,8 +18,13 @@ import (
 type TransportMode string
 
 const (
-	// DefaultSchemaSampleSize is the default number of nodes to sample per label when inferring schema
-	DefaultSchemaSampleSize   int32         = 100
+	// DefaultSchemaSampleSize is the default number of nodes to sample when using the sampling-based schema fallback
+	DefaultSchemaSampleSize int32 = 1000
+	// DefaultSchemaTimeoutSeconds is the default timeout (in seconds) for the primary schema procedures.
+	// If the primary schema queries (db.schema.nodeTypeProperties / relTypeProperties) exceed this duration,
+	// the handler falls back to a Spark-connector-inspired sampling approach.
+	// A value of 0 disables the timeout (no fallback).
+	DefaultSchemaTimeoutSeconds int32 = 30
 	TransportModeStdio        TransportMode = "stdio"
 	TransportModeHTTP         TransportMode = "http"
 	DeprecatedVariableMessage string        = "Warning: deprecated environment variable \"%s\". Please use: \"%s\" instead\n"
@@ -39,6 +44,7 @@ type Config struct {
 	LogLevel                                    string
 	LogFormat                                   string
 	SchemaSampleSize                            int32
+	SchemaTimeoutSeconds                        int32 // Timeout in seconds for primary schema procedures; 0 disables the timeout fallback
 	TransportMode                               TransportMode // MCP Transport mode (e.g., "stdio", "http")
 	HTTPPort                                    string        // HTTP server port (default: "443" with TLS, "80" without TLS)
 	HTTPHost                                    string        // HTTP server host (default: "127.0.0.1")
@@ -114,6 +120,7 @@ type CLIOverrides struct {
 	Database                                    string
 	ReadOnly                                    string
 	Telemetry                                   string
+	SchemaTimeout                               string
 	TransportMode                               string
 	Port                                        string
 	Host                                        string
@@ -161,6 +168,7 @@ func LoadConfig(cliOverrides *CLIOverrides) (*Config, error) {
 		LogLevel:                       logLevel,
 		LogFormat:                      logFormat,
 		SchemaSampleSize:               ParseInt32(GetEnv("NEO4J_SCHEMA_SAMPLE_SIZE"), DefaultSchemaSampleSize),
+		SchemaTimeoutSeconds:           ParseInt32(GetEnv("NEO4J_SCHEMA_TIMEOUT"), DefaultSchemaTimeoutSeconds),
 		TransportMode:                  GetTransportModeWithDefault("NEO4J_TRANSPORT_MODE", GetTransportModeWithDefault("NEO4J_MCP_TRANSPORT", TransportModeStdio)),
 		HTTPPort:                       GetEnv("NEO4J_MCP_HTTP_PORT"), // Default set after TLS determination
 		HTTPHost:                       GetEnvWithDefault("NEO4J_MCP_HTTP_HOST", "127.0.0.1"),
@@ -194,6 +202,9 @@ func LoadConfig(cliOverrides *CLIOverrides) (*Config, error) {
 		}
 		if cliOverrides.Telemetry != "" {
 			cfg.Telemetry = ParseBool(cliOverrides.Telemetry, true)
+		}
+		if cliOverrides.SchemaTimeout != "" {
+			cfg.SchemaTimeoutSeconds = ParseInt32(cliOverrides.SchemaTimeout, DefaultSchemaTimeoutSeconds)
 		}
 		if cliOverrides.TransportMode != "" {
 			cfg.TransportMode = TransportMode(cliOverrides.TransportMode)

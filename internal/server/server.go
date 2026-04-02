@@ -6,6 +6,7 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"log"
 	"log/slog"
@@ -35,6 +36,15 @@ const (
 	serverHTTPReadTimeout       = 15 * time.Second  // SECURITY: Maximum time to read entire request including body (prevents slow-read attacks)
 	serverHTTPWriteTimeout      = 60 * time.Second  // FUNCTIONALITY: Maximum time to write response (allows complex Neo4j queries and large result sets)
 	serverHTTPIdleTimeout       = 120 * time.Second // PERFORMANCE: Maximum time to keep idle keep-alive connections open (improves connection reuse)
+	mcpServerInstruction        = "This is the Neo4j official MCP server providing tool calling to interact " +
+		"with your Neo4j database. Always start by calling get-schema to understand " +
+		"the graph data model, available relationships, and indexes " +
+		"(including full-text indexes which can be queried with " +
+		"db.index.fulltext.queryNodes() and db.index.fulltext.queryRelationships()). " +
+		"Check list-gds-procedures for available graph analytics " +
+		"such as centrality, community detection, and pathfinding before " +
+		"writing manual traversals. Use read-cypher for queries and " +
+		"write-cypher for mutations."
 )
 
 // Neo4jMCPServer represents the MCP server instance
@@ -73,8 +83,7 @@ func NewNeo4jMCPServer(version string, cfg *config.Config, dbService database.Se
 		version,
 		server.WithToolCapabilities(true),
 		server.WithHooks(hooks),
-		server.WithInstructions("This is the Neo4j official MCP server and can provide tool calling to interact with your Neo4j database,"+
-			"by inferring the schema with tools like get-schema and executing arbitrary Cypher queries with read-cypher."),
+		server.WithInstructions(mcpServerInstruction),
 	)
 
 	neo4jServer.MCPServer = mcpServer
@@ -141,7 +150,6 @@ func parseAllowedOrigins(allowedOriginsStr string) []string {
 // verifyRequirements check the Neo4j requirements:
 // - A valid connection with a Neo4j instance.
 // - The ability to perform a read query (database name is correctly defined).
-// - Required plugin installed: APOC (specifically apoc.meta.schema as it's used for get-schema)
 // - In case GDS is not installed a flag is set in the server and tools will be registered accordingly
 func (s *Neo4jMCPServer) verifyRequirements(ctx context.Context) error {
 	err := s.dbService.VerifyConnectivity(ctx)
@@ -149,30 +157,13 @@ func (s *Neo4jMCPServer) verifyRequirements(ctx context.Context) error {
 		return err
 	}
 
-	// Check for apoc.meta.schema procedure
-	checkApocMetaSchemaQuery := "SHOW PROCEDURES YIELD name WHERE name = 'apoc.meta.schema' RETURN count(name) > 0 AS apocMetaSchemaAvailable"
-
-	// Check for apoc.meta.schema availability
-	records, err := s.dbService.ExecuteReadQuery(ctx, checkApocMetaSchemaQuery, nil)
-	if err != nil {
-		return fmt.Errorf("failed to check for APOC availability: %w", err)
-	}
-	if len(records) != 1 || len(records[0].Values) != 1 {
-		return fmt.Errorf("failed to verify APOC availability: unexpected response from test query")
-	}
-	apocMetaSchemaAvailable, ok := records[0].Values[0].(bool)
-	if !ok || !apocMetaSchemaAvailable {
-		return fmt.Errorf("please ensure the APOC plugin is installed and includes the 'meta' component")
-	}
 	// Call gds.version procedure to determine if GDS is installed
-	records, err = s.dbService.ExecuteReadQuery(ctx, "RETURN gds.version() as gdsVersion", nil)
+	records, err := s.dbService.ExecuteReadQuery(ctx, "RETURN gds.version() as gdsVersion", nil)
 	if err != nil {
 		// GDS is optional, so we log a warning and continue, assuming it's not installed.
 		log.Print("Impossible to verify GDS installation.")
 		s.gdsInstalled = false
-		return nil
-	}
-	if len(records) == 1 && len(records[0].Values) == 1 {
+	} else if len(records) == 1 && len(records[0].Values) == 1 {
 		_, ok := records[0].Values[0].(string)
 		if ok {
 			s.gdsInstalled = true
@@ -180,6 +171,20 @@ func (s *Neo4jMCPServer) verifyRequirements(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// toInt64Value converts a numeric value to int64, handling the common Neo4j driver types.
+func toInt64Value(raw any) (int64, bool) {
+	switch v := raw.(type) {
+	case int64:
+		return v, true
+	case int:
+		return int64(v), true
+	case float64:
+		return int64(v), true
+	default:
+		return 0, false
+	}
 }
 
 // emitServerStartupEvent emits the server startup event immediately with available info (no DB query)
@@ -425,21 +430,126 @@ func (s *Neo4jMCPServer) configureHooks() *server.Hooks {
 	return hooks
 }
 
-// handleToolCallComplete is called after every tool call completes
-func (s *Neo4jMCPServer) handleToolCallComplete(_ context.Context, _ any, request *mcp.CallToolRequest, result *mcp.CallToolResult) {
+// handleToolCallComplete is called after every tool call completes.
+// The result parameter is typed as `any` to match the OnAfterCallToolFunc signature
+// defined by the mcp-go SDK (v0.46.0+).
+func (s *Neo4jMCPServer) handleToolCallComplete(_ context.Context, _ any, request *mcp.CallToolRequest, result any) {
 	if s.anService == nil || !s.anService.IsEnabled() {
 		return
 	}
 
 	toolName := request.Params.Name
-	success := !result.IsError
+
+	// Determine success from the result. The SDK passes the raw result as `any`;
+	// type-assert to *mcp.CallToolResult to inspect the IsError field.
+	var toolResult *mcp.CallToolResult
+	success := true
+	if tr, ok := result.(*mcp.CallToolResult); ok {
+		toolResult = tr
+		success = !tr.IsError
+	}
+
+	// Build vector info based on tool type
+	var vectorInfo *analytics.ToolVectorInfo
+	switch toolName {
+	case "get-schema":
+		vectorInfo = extractSchemaVectorInfo(toolResult)
+	case "read-cypher", "write-cypher":
+		vectorInfo = extractCypherVectorInfo(request)
+	case "vector-search":
+		vectorSearchTrue := true
+		vectorInfo = &analytics.ToolVectorInfo{
+			VectorSearch: &vectorSearchTrue,
+		}
+	}
 
 	// Emit tool event (connection info sent separately in CONNECTION_INITIALIZED event)
-	s.anService.EmitEvent(s.anService.NewToolEvent(toolName, success))
+	s.anService.EmitEvent(s.anService.NewToolEvent(toolName, success, vectorInfo))
 
 	// Handle GDS events for cypher tools
 	if toolName == "read-cypher" || toolName == "write-cypher" {
 		s.emitGDSEventsIfNeeded(request)
+	}
+}
+
+// extractSchemaVectorInfo parses the get-schema result to count VECTOR indexes.
+// Returns nil if the result cannot be parsed (graceful degradation — analytics
+// should never break tool execution).
+func extractSchemaVectorInfo(result *mcp.CallToolResult) *analytics.ToolVectorInfo {
+	if result == nil || result.IsError || len(result.Content) == 0 {
+		return nil
+	}
+	textContent, ok := result.Content[0].(mcp.TextContent)
+	if !ok {
+		return nil
+	}
+
+	// Minimal struct to extract just the indexes type field
+	var schema struct {
+		Indexes []struct {
+			Type string `json:"type"`
+		} `json:"indexes"`
+	}
+	if err := json.Unmarshal([]byte(textContent.Text), &schema); err != nil {
+		slog.Debug("failed to parse get-schema result for vector analytics", "error", err)
+		return nil
+	}
+
+	vectorCount := 0
+	fulltextCount := 0
+	for _, idx := range schema.Indexes {
+		if idx.Type == "VECTOR" {
+			vectorCount++
+		}
+		if idx.Type == "FULLTEXT" {
+			fulltextCount++
+		}
+	}
+
+	return &analytics.ToolVectorInfo{
+		VectorIndexCount:   &vectorCount,
+		FullTextIndexCount: &fulltextCount,
+	}
+}
+
+// extractCypherVectorInfo inspects a Cypher query to detect vector search, vector property set,
+// and full-text search operations. Detection is based on well-known procedure names and Cypher patterns.
+func extractCypherVectorInfo(request *mcp.CallToolRequest) *analytics.ToolVectorInfo {
+	args, ok := request.Params.Arguments.(map[string]any)
+	if !ok {
+		return nil
+	}
+	queryRaw, ok := args["query"]
+	if !ok {
+		return nil
+	}
+	queryStr, ok := queryRaw.(string)
+	if !ok {
+		return nil
+	}
+
+	lowerQuery := strings.ToLower(queryStr)
+
+	// Detect vector search: db.index.vector.queryNodes / db.index.vector.queryRelationships
+	vectorSearch := strings.Contains(lowerQuery, "db.index.vector.query")
+
+	// Detect vector property set: db.create.setNodeVectorProperty / db.create.setRelationshipVectorProperty
+	vectorPropertySet := strings.Contains(lowerQuery, "db.create.setnodevectorproperty") ||
+		strings.Contains(lowerQuery, "db.create.setrelationshipvectorproperty")
+
+	// Detect full-text search: db.index.fulltext.queryNodes / db.index.fulltext.queryRelationships
+	fullTextSearch := strings.Contains(lowerQuery, "db.index.fulltext.querynodes") ||
+		strings.Contains(lowerQuery, "db.index.fulltext.queryrelationships")
+
+	// Only return info if at least one operation was detected
+	if !vectorSearch && !vectorPropertySet && !fullTextSearch {
+		return nil
+	}
+
+	return &analytics.ToolVectorInfo{
+		VectorSearch:      &vectorSearch,
+		VectorPropertySet: &vectorPropertySet,
+		FullTextSearch:    &fullTextSearch,
 	}
 }
 
