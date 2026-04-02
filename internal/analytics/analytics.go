@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -90,8 +91,18 @@ func NewAnalyticsWithClient(mixPanelToken string, mixpanelEndpoint string, clien
 	}
 }
 
+// Retuns true if the string contains a URI used by Aura
+// With multiDB, this could be either databases.neo4j.io or instances.neo4j.io
 func isAura(uri string) bool {
-	return strings.Contains(uri, "databases.neo4j.io")
+	// Regex to detect our URI of interest
+	re := regexp.MustCompile(`(databases|instances)\.neo4j\.io`)
+
+	if re.MatchString(uri) {
+		// contains a neo4j.io database or instance URL
+		return true
+	}
+
+	return false
 }
 
 func (a *Analytics) EmitEvent(event TrackEvent) {

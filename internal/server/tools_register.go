@@ -32,7 +32,6 @@ type toolCategory int
 const (
 	cypherCategory toolCategory = 0
 	gdsCategory    toolCategory = 1
-	vectorCategory toolCategory = 2
 )
 
 type ToolDefinition struct {
@@ -57,22 +56,6 @@ func (s *Neo4jMCPServer) addGDSTools() {
 	s.MCPServer.AddTools(toolDefinition...)
 }
 
-func (s *Neo4jMCPServer) addVectorTools() {
-	deps := s.buildToolDependencies()
-	toolDefs := s.getAllToolsDefs(deps)
-	toolDefinition := make([]server.ServerTool, 0)
-	vectorTools := make([]ToolDefinition, 0, len(toolDefs))
-	for _, t := range toolDefs {
-		if t.category == vectorCategory {
-			vectorTools = append(vectorTools, t)
-		}
-	}
-	for _, toolDef := range vectorTools {
-		toolDefinition = append(toolDefinition, toolDef.definition)
-	}
-	s.MCPServer.AddTools(toolDefinition...)
-}
-
 func (s *Neo4jMCPServer) getEnabledTools() []server.ServerTool {
 	filters := make([]toolFilter, 0)
 
@@ -84,10 +67,7 @@ func (s *Neo4jMCPServer) getEnabledTools() []server.ServerTool {
 	if !s.gdsInstalled {
 		filters = append(filters, filterGDSTools)
 	}
-	// If no vector indexes are found, disable vector tools.
-	if !s.vectorIndexesFound {
-		filters = append(filters, filterVectorTools)
-	}
+
 	deps := s.buildToolDependencies()
 	toolDefs := s.getAllToolsDefs(deps)
 
@@ -119,16 +99,6 @@ func filterGDSTools(tools []ToolDefinition) []ToolDefinition {
 		}
 	}
 	return nonGDSTools
-}
-
-func filterVectorTools(tools []ToolDefinition) []ToolDefinition {
-	nonVectorTools := make([]ToolDefinition, 0, len(tools))
-	for _, t := range tools {
-		if t.category != vectorCategory {
-			nonVectorTools = append(nonVectorTools, t)
-		}
-	}
-	return nonVectorTools
 }
 
 // buildToolDependencies creates a ToolDependencies with all config wired through.

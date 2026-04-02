@@ -58,7 +58,6 @@ type Neo4jMCPServer struct {
 	version            string
 	anService          analytics.Service
 	gdsInstalled       bool
-	vectorIndexesFound bool
 	initMu             sync.Mutex
 	connectionVerified atomic.Bool
 }
@@ -68,14 +67,13 @@ type Neo4jMCPServer struct {
 func NewNeo4jMCPServer(version string, cfg *config.Config, dbService database.Service, anService analytics.Service) *Neo4jMCPServer {
 
 	neo4jServer := &Neo4jMCPServer{
-		HTTPServerReady:    make(chan struct{}),
-		shutdownChan:       make(chan struct{}),
-		config:             cfg,
-		dbService:          dbService,
-		version:            version,
-		anService:          anService,
-		gdsInstalled:       false,
-		vectorIndexesFound: false,
+		HTTPServerReady: make(chan struct{}),
+		shutdownChan:    make(chan struct{}),
+		config:          cfg,
+		dbService:       dbService,
+		version:         version,
+		anService:       anService,
+		gdsInstalled:    false,
 	}
 
 	hooks := neo4jServer.configureHooks()
@@ -152,7 +150,6 @@ func parseAllowedOrigins(allowedOriginsStr string) []string {
 // verifyRequirements check the Neo4j requirements:
 // - A valid connection with a Neo4j instance.
 // - The ability to perform a read query (database name is correctly defined).
-// - Required plugin installed: APOC (specifically apoc.meta.schema as it's used for get-schema)
 // - In case GDS is not installed a flag is set in the server and tools will be registered accordingly
 func (s *Neo4jMCPServer) verifyRequirements(ctx context.Context) error {
 	err := s.dbService.VerifyConnectivity(ctx)
@@ -160,23 +157,8 @@ func (s *Neo4jMCPServer) verifyRequirements(ctx context.Context) error {
 		return err
 	}
 
-	// Check for apoc.meta.schema procedure
-	checkApocMetaSchemaQuery := "SHOW PROCEDURES YIELD name WHERE name = 'apoc.meta.schema' RETURN count(name) > 0 AS apocMetaSchemaAvailable"
-
-	// Check for apoc.meta.schema availability
-	records, err := s.dbService.ExecuteReadQuery(ctx, checkApocMetaSchemaQuery, nil)
-	if err != nil {
-		return fmt.Errorf("failed to check for APOC availability: %w", err)
-	}
-	if len(records) != 1 || len(records[0].Values) != 1 {
-		return fmt.Errorf("failed to verify APOC availability: unexpected response from test query")
-	}
-	apocMetaSchemaAvailable, ok := records[0].Values[0].(bool)
-	if !ok || !apocMetaSchemaAvailable {
-		return fmt.Errorf("please ensure the APOC plugin is installed and includes the 'meta' component")
-	}
 	// Call gds.version procedure to determine if GDS is installed
-	records, err = s.dbService.ExecuteReadQuery(ctx, "RETURN gds.version() as gdsVersion", nil)
+	records, err := s.dbService.ExecuteReadQuery(ctx, "RETURN gds.version() as gdsVersion", nil)
 	if err != nil {
 		// GDS is optional, so we log a warning and continue, assuming it's not installed.
 		log.Print("Impossible to verify GDS installation.")
@@ -185,19 +167,6 @@ func (s *Neo4jMCPServer) verifyRequirements(ctx context.Context) error {
 		_, ok := records[0].Values[0].(string)
 		if ok {
 			s.gdsInstalled = true
-		}
-	}
-
-	// Check for vector indexes to enable the vector-search tool
-	vectorRecords, err := s.dbService.ExecuteReadQuery(ctx,
-		"SHOW INDEXES YIELD type WHERE type = 'VECTOR' RETURN count(*) AS count", nil)
-	if err != nil {
-		slog.Warn("failed to check for vector indexes, vector-search tool will be disabled", "error", err)
-		s.vectorIndexesFound = false
-	} else if len(vectorRecords) == 1 && len(vectorRecords[0].Values) >= 1 {
-		if count, ok := toInt64Value(vectorRecords[0].Values[0]); ok && count > 0 {
-			s.vectorIndexesFound = true
-			slog.Info("vector indexes detected, enabling vector-search tool", "count", count)
 		}
 	}
 
@@ -450,10 +419,6 @@ func (s *Neo4jMCPServer) configureHooks() *server.Hooks {
 
 			if s.gdsInstalled {
 				s.addGDSTools()
-			}
-
-			if s.vectorIndexesFound {
-				s.addVectorTools()
 			}
 
 			s.emitConnectionInitializedEvent(ctx)
