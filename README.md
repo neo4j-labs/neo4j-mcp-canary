@@ -46,27 +46,27 @@ If an optional dependency is missing, the server will start in an adaptive mode.
 Releases: https://github.com/neo4j-labs/neo4j-mcp-canary/releases
 
 1. Download the archive for your OS/arch.
-2. Extract and place `neo4j-mcp` in a directory present in your PATH variables (see examples below).
+2. Extract and place `neo4j-mcp-canary` in a directory present in your PATH variables (see examples below).
 
 Mac / Linux:
 
 > On Mac, you may be warned the first time you try and run the Mac binary.  If that happens you may need to approve it using Settings -> Privacy & Security
 
 ```bash
-chmod +x neo4j-mcp
+chmod +x neo4j-mcp-canary
 sudo mv neo4j-mcp /usr/local/bin/
 ```
 
 Windows (PowerShell / cmd):
 
 ```powershell
-move neo4j-mcp.exe C:\Windows\System32
+move neo4j-mcp-canary.exe C:\Windows\System32
 ```
 
 Verify the neo4j-mcp installation:
 
 ```bash
-neo4j-mcp -v
+neo4j-mcp-canary -v
 ```
 
 Should print the installed version.
@@ -136,7 +136,7 @@ export NEO4J_MCP_HTTP_TLS_ENABLED="true"
 export NEO4J_MCP_HTTP_TLS_CERT_FILE="/path/to/cert.pem"
 export NEO4J_MCP_HTTP_TLS_KEY_FILE="/path/to/key.pem"
 
-neo4j-mcp
+neo4j-mcp-canary
 # Server will listen on https://127.0.0.1:443 by default
 ```
 
@@ -146,7 +146,7 @@ For detailed instructions on certificate generation, testing TLS, and production
 
 ## Configuration Options
 
-The `neo4j-mcp` server can be configured using environment variables or CLI flags. CLI flags take precedence over environment variables.
+The `neo4j-mcp-canary` server can be configured using environment variables or CLI flags. CLI flags take precedence over environment variables.
 
 ### Environment Variables
 
@@ -157,7 +157,7 @@ See the [Client Setup Guide](docs/CLIENT_SETUP.md) for configuration examples.
 You can override any environment variable using CLI flags:
 
 ```bash
-neo4j-mcp --neo4j-uri "bolt://localhost:7687" \
+neo4j-mcp-canary --neo4j-uri "bolt://localhost:7687" \
           --neo4j-username "neo4j" \
           --neo4j-password "password" \
           --neo4j-database "neo4j" \
@@ -187,7 +187,7 @@ Available flags:
 - `--neo4j-http-allow-unauthenticated-notifications-initialize` Allow unauthenticated tools list: `true` or `false` (overrides NEO4J_HTTP_ALLOW_UNAUTHENTICATED_NOTIFICATIONS_INITIALIZE)
 
 
-Use `neo4j-mcp --help` to see all available options.
+Use `neo4j-mcp-canary --help` to see all available options.
 
 ## Authentication Methods (HTTP Mode)
 
@@ -261,7 +261,7 @@ When enabled, write tools (for example, `write-cypher`) are not exposed to clien
 
 ### Query Classification
 
-The `read-cypher` tool performs an extra round-trip to the Neo4j database to guarantee read-only operations.
+The `read-cypher` tool performs an extra round-trip to the Neo4j database for read-only operations.
 
 Important notes:
 
