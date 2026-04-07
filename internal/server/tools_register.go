@@ -40,6 +40,7 @@ type ToolDefinition struct {
 	readonly   bool
 }
 
+/*
 func (s *Neo4jMCPServer) addGDSTools() {
 	deps := s.buildToolDependencies()
 	toolDefs := s.getAllToolsDefs(deps)
@@ -54,6 +55,12 @@ func (s *Neo4jMCPServer) addGDSTools() {
 		toolDefinition = append(toolDefinition, toolDef.definition)
 	}
 	s.MCPServer.AddTools(toolDefinition...)
+}
+*/
+
+func (s *Neo4jMCPServer) addGDSTools() {
+	filteredTools := s.getEnabledTools()
+	s.MCPServer.AddTools(filteredTools...)
 }
 
 func (s *Neo4jMCPServer) getEnabledTools() []server.ServerTool {
