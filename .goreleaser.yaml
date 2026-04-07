@@ -10,7 +10,7 @@ before:
 builds:
   - id: neo4j-mcp
     main: ./cmd/neo4j-mcp
-    binary: neo4j-mcp
+    binary: neo4j-mcp-canary
     env:
       - CGO_ENABLED=0        # pure Go, no C deps — enables clean cross-compilation
     goos:
