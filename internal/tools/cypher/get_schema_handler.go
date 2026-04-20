@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 
@@ -18,6 +19,9 @@ import (
 )
 
 // DefaultFallbackSampleSize is used when SchemaSampleSize is not configured.
+// This value is interpreted as the per-label / per-relationship-type budget,
+// not a database-wide total — total work scales with the number of distinct
+// labels and relationship types in the graph, not with the number of records.
 const DefaultFallbackSampleSize = 1000
 
 const (
@@ -46,39 +50,74 @@ const (
 		YIELD name, type, entityType, labelsOrTypes, properties, state, options
 		WHERE state = 'ONLINE' AND type <> 'LOOKUP'`
 
-	// --- Sampling-based fallback queries (Spark-connector inspired) ---
+	// --- Sampling-based fallback queries ---
+	//
 	// These are used when the primary db.schema procedures time out on large graphs.
-	// Instead of scanning all data via procedures, they sample a limited number of
-	// records and infer the schema from actual property values using valueType() (Neo4j 5.x+).
+	// Unlike a plain `MATCH (n) LIMIT k` sample — which is biased by storage order
+	// and will almost exclusively return the dominant label on skewed graphs — these
+	// queries use `db.labels()` / `db.relationshipTypes()` to enumerate every label
+	// and relationship type and then take a bounded per-entity sample via a CALL
+	// subquery. Every label and relationship type therefore gets its own budget,
+	// so rare entities are represented even when one entity dominates by volume.
+	//
+	// The $sampleSize parameter is the per-label / per-type budget. Total work is
+	// bounded by sampleSize × number-of-labels (for node properties) and
+	// sampleSize × number-of-relationship-types (for relationship properties and
+	// patterns), so it scales with schema breadth rather than data volume.
+	//
+	// Known limitation: a label or relationship type whose sampled records happen
+	// to have no properties will not appear in the output (the inner UNWIND yields
+	// zero rows). The completeness heuristic in populateMetadataHeuristics catches
+	// this case when an index references the missing label/type.
+	//
+	// Property types are inferred using valueType() (Neo4j 5.x+). The CALL { WITH var }
+	// importing form is used for compatibility with Neo4j 5.0–5.22; the newer
+	// CALL (var) { ... } scope syntax (5.23+) would be a drop-in replacement.
 
-	// sampleNodePropertiesQuery samples nodes and infers property names and types.
+	// sampleNodePropertiesQuery samples up to $sampleSize nodes per label and
+	// infers property names and types from the sampled nodes.
 	sampleNodePropertiesQuery = `
-		MATCH (n)
-		WITH n LIMIT $sampleSize
-		UNWIND labels(n) AS label
-		UNWIND keys(n) AS key
-		WITH label, key, valueType(n[key]) AS propType
-		RETURN label, key, collect(DISTINCT propType) AS types
+		CALL db.labels() YIELD label
+		CALL {
+			WITH label
+			MATCH (n) WHERE label IN labels(n)
+			WITH n LIMIT $sampleSize
+			UNWIND keys(n) AS key
+			WITH key, valueType(n[key]) AS propType
+			RETURN key, collect(DISTINCT propType) AS types
+		}
+		RETURN label, key, types
 		ORDER BY label, key`
 
-	// sampleRelPropertiesQuery samples relationships and infers property names and types.
+	// sampleRelPropertiesQuery samples up to $sampleSize relationships per type
+	// and infers property names and types from the sampled relationships.
 	sampleRelPropertiesQuery = `
-		MATCH ()-[r]->()
-		WITH r LIMIT $sampleSize
-		WITH type(r) AS relType, r
-		UNWIND keys(r) AS key
-		WITH relType, key, valueType(r[key]) AS propType
-		RETURN relType, key, collect(DISTINCT propType) AS types
+		CALL db.relationshipTypes() YIELD relationshipType
+		CALL {
+			WITH relationshipType
+			MATCH ()-[r]->() WHERE type(r) = relationshipType
+			WITH r LIMIT $sampleSize
+			UNWIND keys(r) AS key
+			WITH key, valueType(r[key]) AS propType
+			RETURN key, collect(DISTINCT propType) AS types
+		}
+		RETURN relationshipType AS relType, key, types
 		ORDER BY relType, key`
 
-	// sampleRelPatternsQuery samples relationships to discover (fromLabel, relType, toLabel) patterns.
+	// sampleRelPatternsQuery samples up to $sampleSize relationships per type
+	// and discovers (fromLabel, relType, toLabel) patterns from each sample.
 	sampleRelPatternsQuery = `
-		MATCH (a)-[r]->(b)
-		WITH a, r, b LIMIT $sampleSize
-		UNWIND labels(a) AS fromLabel
-		UNWIND labels(b) AS toLabel
-		WITH DISTINCT fromLabel, type(r) AS relType, toLabel
-		RETURN fromLabel, relType, toLabel`
+		CALL db.relationshipTypes() YIELD relationshipType
+		CALL {
+			WITH relationshipType
+			MATCH (a)-[r]->(b) WHERE type(r) = relationshipType
+			WITH a, b LIMIT $sampleSize
+			UNWIND labels(a) AS fromLabel
+			UNWIND labels(b) AS toLabel
+			RETURN fromLabel, toLabel
+		}
+		RETURN DISTINCT fromLabel, relationshipType AS relType, toLabel
+		ORDER BY fromLabel, relType, toLabel`
 )
 
 // --- Output types ---
@@ -88,20 +127,23 @@ type SchemaResponse struct {
 	Nodes         []NodeSchema         `json:"nodes,omitempty"`
 	Relationships []RelationshipSchema `json:"relationships,omitempty"`
 	Indexes       []IndexInfo          `json:"indexes,omitempty"`
+	Metadata      *SchemaMetadata      `json:"metadata,omitempty"`
 }
 
 // NodeSchema describes a single node label and its properties.
 type NodeSchema struct {
-	Label      string            `json:"label"`
-	Properties map[string]string `json:"properties,omitempty"`
+	Label              string            `json:"label"`
+	Properties         map[string]string `json:"properties,omitempty"`
+	RequiredProperties []string          `json:"requiredProperties,omitempty"`
 }
 
 // RelationshipSchema describes a relationship pattern (from label -> to label) and its properties.
 type RelationshipSchema struct {
-	Type       string            `json:"type"`
-	From       string            `json:"from,omitempty"`
-	To         string            `json:"to,omitempty"`
-	Properties map[string]string `json:"properties,omitempty"`
+	Type               string            `json:"type"`
+	From               string            `json:"from,omitempty"`
+	To                 string            `json:"to,omitempty"`
+	Properties         map[string]string `json:"properties,omitempty"`
+	RequiredProperties []string          `json:"requiredProperties,omitempty"`
 }
 
 // IndexInfo describes a database index, with additional fields for vector indexes.
@@ -113,6 +155,188 @@ type IndexInfo struct {
 	Properties         []string `json:"properties"`
 	Dimensions         *int64   `json:"dimensions,omitempty"`
 	SimilarityFunction *string  `json:"similarityFunction,omitempty"`
+}
+
+// Schema source values for SchemaMetadata.Source.
+const (
+	// SchemaSourceFullScan indicates the schema was retrieved via the built-in
+	// db.schema.nodeTypeProperties() and db.schema.relTypeProperties() procedures,
+	// which cover all data in the database.
+	SchemaSourceFullScan = "full_scan"
+
+	// SchemaSourceSampled indicates the schema was inferred from a bounded sample
+	// of records after the primary db.schema procedures exceeded the configured timeout.
+	// Results may be incomplete — rare labels, relationship types, or properties
+	// may be absent from the response.
+	SchemaSourceSampled = "sampled"
+)
+
+// SchemaMetadata describes the provenance of a SchemaResponse so that consumers
+// (in particular LLM agents) can weight the schema appropriately when writing
+// Cypher queries or reasoning about the data model.
+type SchemaMetadata struct {
+	// Source is how the schema was retrieved: SchemaSourceFullScan or SchemaSourceSampled.
+	Source string `json:"source"`
+
+	// SampleSize is the number of records examined when Source is "sampled".
+	// Omitted when Source is "full_scan".
+	SampleSize int `json:"sampleSize,omitempty"`
+
+	// TimeoutSeconds is the configured timeout that was exceeded, triggering the
+	// fallback sampling path. Omitted when Source is "full_scan".
+	TimeoutSeconds float64 `json:"timeoutSeconds,omitempty"`
+
+	// MissingNodeLabels lists node labels that appear in the indexes array but
+	// are absent from the nodes array. Because indexes come from database metadata
+	// (SHOW INDEXES) rather than data sampling, they are always complete — so any
+	// discrepancy here is a strong signal that the main schema retrieval returned
+	// an incomplete picture, even when Source is "full_scan".
+	MissingNodeLabels []string `json:"missingNodeLabels,omitempty"`
+
+	// MissingRelTypes lists relationship types that appear in the indexes array
+	// but are absent from the relationships array. See MissingNodeLabels.
+	MissingRelTypes []string `json:"missingRelTypes,omitempty"`
+
+	// Note is a human/LLM-readable description of any caveats about the schema.
+	// Populated when the retrieval was sampled, when a completeness heuristic
+	// fired, or both. Absent when the schema was retrieved via a full scan with
+	// no detected discrepancies.
+	Note string `json:"note,omitempty"`
+}
+
+// newFullScanMetadata returns metadata indicating the primary schema path succeeded.
+// The Note and Missing* fields are populated later by populateMetadataHeuristics
+// once the full response (including indexes) is available.
+func newFullScanMetadata() *SchemaMetadata {
+	return &SchemaMetadata{Source: SchemaSourceFullScan}
+}
+
+// newSampledMetadata returns metadata indicating the sampling fallback was used.
+// The Note and Missing* fields are populated later by populateMetadataHeuristics
+// once the full response (including indexes) is available.
+func newSampledMetadata(sampleSize int, timeout time.Duration) *SchemaMetadata {
+	return &SchemaMetadata{
+		Source:         SchemaSourceSampled,
+		SampleSize:     sampleSize,
+		TimeoutSeconds: timeout.Seconds(),
+	}
+}
+
+// populateMetadataHeuristics runs quality checks on a fully-assembled SchemaResponse
+// and populates the Metadata.MissingNodeLabels, MissingRelTypes, and Note fields.
+//
+// It compares labels and relationship types referenced by the indexes array
+// against those present in the nodes and relationships arrays. Any label or
+// type that appears in indexes (database metadata, always complete) but not in
+// the main arrays is recorded as "missing" — a signal that the agent should
+// cross-check by querying those labels/types directly.
+//
+// The Note is composed dynamically so that both the retrieval path (sampled vs
+// full-scan) and the heuristic outcome are reflected together. For a clean
+// full-scan with no discrepancies the Note is left empty.
+func populateMetadataHeuristics(response *SchemaResponse) {
+	if response == nil || response.Metadata == nil {
+		return
+	}
+	detectMissingEntities(response)
+	buildMetadataNote(response)
+}
+
+// detectMissingEntities populates MissingNodeLabels and MissingRelTypes on
+// response.Metadata by comparing the indexes array against the nodes and
+// relationships arrays. Internal labels (e.g. _Bloom_*) are excluded because
+// they are already filtered out of the main schema.
+func detectMissingEntities(response *SchemaResponse) {
+	meta := response.Metadata
+
+	presentLabels := make(map[string]struct{}, len(response.Nodes))
+	for _, n := range response.Nodes {
+		presentLabels[n.Label] = struct{}{}
+	}
+	presentRelTypes := make(map[string]struct{}, len(response.Relationships))
+	for _, r := range response.Relationships {
+		presentRelTypes[r.Type] = struct{}{}
+	}
+
+	indexedLabels := make(map[string]struct{})
+	indexedRelTypes := make(map[string]struct{})
+	for _, idx := range response.Indexes {
+		for _, lt := range idx.LabelsOrTypes {
+			if isInternalLabel(lt) {
+				continue
+			}
+			switch idx.EntityType {
+			case "NODE":
+				indexedLabels[lt] = struct{}{}
+			case "RELATIONSHIP":
+				indexedRelTypes[lt] = struct{}{}
+			}
+		}
+	}
+
+	var missingLabels []string
+	for l := range indexedLabels {
+		if _, ok := presentLabels[l]; !ok {
+			missingLabels = append(missingLabels, l)
+		}
+	}
+	var missingRelTypes []string
+	for r := range indexedRelTypes {
+		if _, ok := presentRelTypes[r]; !ok {
+			missingRelTypes = append(missingRelTypes, r)
+		}
+	}
+	sort.Strings(missingLabels)
+	sort.Strings(missingRelTypes)
+
+	meta.MissingNodeLabels = missingLabels
+	meta.MissingRelTypes = missingRelTypes
+}
+
+// buildMetadataNote composes the Note field from the source of the schema and
+// any incompleteness detected by detectMissingEntities. A clean full scan
+// produces an empty Note so the agent can trust the response without friction.
+func buildMetadataNote(response *SchemaResponse) {
+	meta := response.Metadata
+	hasMissing := len(meta.MissingNodeLabels) > 0 || len(meta.MissingRelTypes) > 0
+
+	var parts []string
+
+	if meta.Source == SchemaSourceSampled {
+		parts = append(parts, fmt.Sprintf(
+			"Schema was inferred from a sample of %d records after the full-scan schema query "+
+				"exceeded the %.1fs timeout. Rare labels, relationship types, or properties may be "+
+				"missing from the nodes and relationships arrays.",
+			meta.SampleSize, meta.TimeoutSeconds))
+	}
+
+	if hasMissing {
+		bits := []string{
+			"The indexes array references labels or relationship types that are absent from " +
+				"the main schema arrays, so the retrieval returned an incomplete picture of the database.",
+		}
+		if len(meta.MissingNodeLabels) > 0 {
+			bits = append(bits, fmt.Sprintf(
+				"Node labels present in indexes but missing from the nodes array: %s.",
+				strings.Join(meta.MissingNodeLabels, ", ")))
+		}
+		if len(meta.MissingRelTypes) > 0 {
+			bits = append(bits, fmt.Sprintf(
+				"Relationship types present in indexes but missing from the relationships array: %s.",
+				strings.Join(meta.MissingRelTypes, ", ")))
+		}
+		bits = append(bits,
+			"Query these directly (for example MATCH (n:<Label>) RETURN n LIMIT 1) to discover "+
+				"their properties, and treat already-listed entities with mild caution because "+
+				"their properties may be similarly incomplete.")
+		parts = append(parts, strings.Join(bits, " "))
+	} else if meta.Source == SchemaSourceSampled {
+		parts = append(parts,
+			"The indexes array is complete (sourced from database metadata, not data sampling) "+
+				"and should be used to cross-check which labels and relationship types exist in the database.")
+	}
+
+	meta.Note = strings.Join(parts, " ")
 }
 
 // --- Handler ---
@@ -133,6 +357,15 @@ func GetSchemaHandler(deps *tools.ToolDependencies, schemaSampleSize int32) func
 // (db.schema.nodeTypeProperties / relTypeProperties) are executed with a timeout.
 // If they exceed the deadline, the handler falls back to a Spark-connector-inspired
 // sampling approach that infers the schema from a limited number of records.
+//
+// The returned SchemaResponse always carries a Metadata field indicating which
+// path was used (full_scan vs sampled). After the response is assembled a
+// completeness heuristic compares the indexes array (from SHOW INDEXES, always
+// complete) against the nodes and relationships arrays; any label or relationship
+// type present in indexes but absent from the main arrays is recorded in
+// Metadata.MissingNodeLabels / MissingRelTypes and summarised in Metadata.Note.
+// This catches the case where the primary db.schema procedures silently return
+// an incomplete result on large or unusual graphs even without a timeout.
 func handleGetSchema(ctx context.Context, deps *tools.ToolDependencies) (*mcp.CallToolResult, error) {
 	if deps.DBService == nil {
 		errMessage := "database service is not initialized"
@@ -203,6 +436,8 @@ func handleGetSchema(ctx context.Context, deps *tools.ToolDependencies) (*mcp.Ca
 		slog.Error("failed to process schema", "error", err)
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	response.Metadata = newFullScanMetadata()
+	populateMetadataHeuristics(response)
 
 	jsonData, err := json.Marshal(response)
 	if err != nil {
@@ -213,10 +448,15 @@ func handleGetSchema(ctx context.Context, deps *tools.ToolDependencies) (*mcp.Ca
 	return mcp.NewToolResultText(string(jsonData)), nil
 }
 
-// handleGetSchemaFallback uses a Spark-connector-inspired sampling approach to infer
-// the schema from a limited number of records. This avoids the full-scan behaviour of
-// db.schema.nodeTypeProperties() / relTypeProperties() which can time out on large graphs.
-// Property types are inferred using the valueType() function (Neo4j 5.x+).
+// handleGetSchemaFallback uses a per-label / per-relationship-type sampling
+// approach to infer the schema from a bounded number of records when the
+// primary db.schema procedures would otherwise time out on large graphs.
+//
+// For each label returned by db.labels() — and each type returned by
+// db.relationshipTypes() — a CALL subquery samples up to SchemaSampleSize
+// records and infers property types via valueType() (Neo4j 5.x+). This avoids
+// the storage-order bias of a plain `MATCH (n) LIMIT k` sample, which on a
+// graph dominated by one label would almost never surface the rarer ones.
 func handleGetSchemaFallback(ctx context.Context, deps *tools.ToolDependencies) (*mcp.CallToolResult, error) {
 	sampleSize := deps.SchemaSampleSize
 	if sampleSize <= 0 {
@@ -282,7 +522,9 @@ func handleGetSchemaFallback(ctx context.Context, deps *tools.ToolDependencies) 
 		Nodes:         nodes,
 		Relationships: relationships,
 		Indexes:       indexes,
+		Metadata:      newSampledMetadata(sampleSize, deps.SchemaTimeout),
 	}
+	populateMetadataHeuristics(response)
 
 	jsonData, err := json.Marshal(response)
 	if err != nil {
@@ -332,8 +574,8 @@ func buildSchemaResponse(nodeRecords, relRecords, patternRecords, indexRecords [
 //
 // Note: db.schema.nodeTypeProperties() may return rows with a null propertyName for labels
 // that have no properties. In this case we register the label but skip adding any property.
-func processNodeProperties(records []*neo4j.Record) (map[string]map[string]string, error) {
-	nodeMap := make(map[string]map[string]string)
+func processNodeProperties(records []*neo4j.Record) (map[string]map[string]propMeta, error) {
+	nodeMap := make(map[string]map[string]propMeta)
 
 	for _, record := range records {
 		nodeLabelsRaw, ok := record.Get("nodeLabels")
@@ -357,7 +599,7 @@ func processNodeProperties(records []*neo4j.Record) (map[string]map[string]strin
 		// Ensure every label is registered in the map, even if it has no properties.
 		for _, label := range labels {
 			if nodeMap[label] == nil {
-				nodeMap[label] = make(map[string]string)
+				nodeMap[label] = make(map[string]propMeta)
 			}
 		}
 
@@ -372,10 +614,13 @@ func processNodeProperties(records []*neo4j.Record) (map[string]map[string]strin
 			return nil, fmt.Errorf("invalid propertyName: expected string")
 		}
 
-		propType := normalizePropertyTypes(propertyTypesRaw)
+		info := propMeta{
+			Type:     normalizePropertyTypes(propertyTypesRaw),
+			Required: allNotNull(propertyTypesRaw),
+		}
 
 		for _, label := range labels {
-			nodeMap[label][propName] = propType
+			nodeMap[label][propName] = info
 		}
 	}
 
@@ -388,8 +633,8 @@ func processNodeProperties(records []*neo4j.Record) (map[string]map[string]strin
 // Note: db.schema.relTypeProperties() returns rows with a null propertyName for relationship types
 // that have no properties (e.g. DIRECTED, PRODUCED). In this case we register the type but skip
 // adding any property.
-func processRelProperties(records []*neo4j.Record) (map[string]map[string]string, error) {
-	relMap := make(map[string]map[string]string)
+func processRelProperties(records []*neo4j.Record) (map[string]map[string]propMeta, error) {
+	relMap := make(map[string]map[string]propMeta)
 
 	for _, record := range records {
 		relTypeRaw, ok := record.Get("relType")
@@ -413,7 +658,7 @@ func processRelProperties(records []*neo4j.Record) (map[string]map[string]string
 
 		// Ensure every relationship type is registered in the map, even if it has no properties.
 		if relMap[relType] == nil {
-			relMap[relType] = make(map[string]string)
+			relMap[relType] = make(map[string]propMeta)
 		}
 
 		// propertyName is null when a relationship type has no properties — skip the property
@@ -427,29 +672,48 @@ func processRelProperties(records []*neo4j.Record) (map[string]map[string]string
 			return nil, fmt.Errorf("invalid propertyName: expected string")
 		}
 
-		propType := normalizePropertyTypes(propertyTypesRaw)
-
-		relMap[relType][propName] = propType
+		relMap[relType][propName] = propMeta{
+			Type:     normalizePropertyTypes(propertyTypesRaw),
+			Required: allNotNull(propertyTypesRaw),
+		}
 	}
 
 	return relMap, nil
 }
 
+// splitPropMeta converts the internal propMeta map into the two public-facing
+// fields on a schema entry: a name→type map for Properties and a sorted list
+// of required property names. Returns (nil, nil) for an empty input so callers
+// can rely on omitempty behaviour.
+func splitPropMeta(m map[string]propMeta) (map[string]string, []string) {
+	if len(m) == 0 {
+		return nil, nil
+	}
+	properties := make(map[string]string, len(m))
+	var required []string
+	for name, info := range m {
+		properties[name] = info.Type
+		if info.Required {
+			required = append(required, name)
+		}
+	}
+	sort.Strings(required)
+	return properties, required
+}
+
 // buildNodeSchemas creates a sorted list of NodeSchema from the per-label property map.
 // Labels matching internal prefixes (e.g. _Bloom_) are excluded.
-func buildNodeSchemas(nodeProps map[string]map[string]string) []NodeSchema {
+func buildNodeSchemas(nodeProps map[string]map[string]propMeta) []NodeSchema {
 	nodes := make([]NodeSchema, 0, len(nodeProps))
 	for label, props := range nodeProps {
 		if isInternalLabel(label) {
 			continue
 		}
-		var properties map[string]string
-		if len(props) > 0 {
-			properties = props
-		}
+		properties, required := splitPropMeta(props)
 		nodes = append(nodes, NodeSchema{
-			Label:      label,
-			Properties: properties,
+			Label:              label,
+			Properties:         properties,
+			RequiredProperties: required,
 		})
 	}
 	sort.Slice(nodes, func(i, j int) bool {
@@ -460,7 +724,7 @@ func buildNodeSchemas(nodeProps map[string]map[string]string) []NodeSchema {
 
 // buildRelSchemas creates a sorted list of RelationshipSchema by combining relationship patterns
 // (which tell us from -> type -> to) with relationship properties (which tell us the property types).
-func buildRelSchemas(relProps map[string]map[string]string, patternRecords []*neo4j.Record) []RelationshipSchema {
+func buildRelSchemas(relProps map[string]map[string]propMeta, patternRecords []*neo4j.Record) []RelationshipSchema {
 	type patternKey struct {
 		from    string
 		relType string
@@ -498,16 +762,14 @@ func buildRelSchemas(relProps map[string]map[string]string, patternRecords []*ne
 		seen[key] = true
 		seenTypes[relType] = true
 
-		var props map[string]string
-		if p, ok := relProps[relType]; ok && len(p) > 0 {
-			props = p
-		}
+		properties, required := splitPropMeta(relProps[relType])
 
 		rels = append(rels, RelationshipSchema{
-			Type:       relType,
-			From:       from,
-			To:         to,
-			Properties: props,
+			Type:               relType,
+			From:               from,
+			To:                 to,
+			Properties:         properties,
+			RequiredProperties: required,
 		})
 	}
 
@@ -518,13 +780,11 @@ func buildRelSchemas(relProps map[string]map[string]string, patternRecords []*ne
 		if seenTypes[relType] || isInternalLabel(relType) {
 			continue
 		}
-		var properties map[string]string
-		if len(props) > 0 {
-			properties = props
-		}
+		properties, required := splitPropMeta(props)
 		rels = append(rels, RelationshipSchema{
-			Type:       relType,
-			Properties: properties,
+			Type:               relType,
+			Properties:         properties,
+			RequiredProperties: required,
 		})
 	}
 
@@ -632,10 +892,10 @@ func extractVectorConfig(info *IndexInfo, optionsRaw any) {
 
 // --- Sampling processors ---
 
-// processSampledNodeProperties builds the label → property → type map from sampling query results.
+// processSampledNodeProperties builds the label → property → propMeta map from sampling query results.
 // Each record has columns: label (string), key (string), types (list of strings from valueType()).
-func processSampledNodeProperties(records []*neo4j.Record) map[string]map[string]string {
-	nodeMap := make(map[string]map[string]string)
+func processSampledNodeProperties(records []*neo4j.Record) map[string]map[string]propMeta {
+	nodeMap := make(map[string]map[string]propMeta)
 
 	for _, record := range records {
 		labelRaw, ok := record.Get("label")
@@ -661,19 +921,22 @@ func processSampledNodeProperties(records []*neo4j.Record) map[string]map[string
 		}
 
 		if nodeMap[label] == nil {
-			nodeMap[label] = make(map[string]string)
+			nodeMap[label] = make(map[string]propMeta)
 		}
 
-		nodeMap[label][key] = normalizeValueTypes(typesRaw)
+		nodeMap[label][key] = propMeta{
+			Type:     normalizeValueTypes(typesRaw),
+			Required: allNotNull(typesRaw),
+		}
 	}
 
 	return nodeMap
 }
 
-// processSampledRelProperties builds the relType → property → type map from sampling query results.
+// processSampledRelProperties builds the relType → property → propMeta map from sampling query results.
 // Each record has columns: relType (string), key (string), types (list of strings from valueType()).
-func processSampledRelProperties(records []*neo4j.Record) map[string]map[string]string {
-	relMap := make(map[string]map[string]string)
+func processSampledRelProperties(records []*neo4j.Record) map[string]map[string]propMeta {
+	relMap := make(map[string]map[string]propMeta)
 
 	for _, record := range records {
 		relTypeRaw, ok := record.Get("relType")
@@ -699,10 +962,13 @@ func processSampledRelProperties(records []*neo4j.Record) map[string]map[string]
 		}
 
 		if relMap[relType] == nil {
-			relMap[relType] = make(map[string]string)
+			relMap[relType] = make(map[string]propMeta)
 		}
 
-		relMap[relType][key] = normalizeValueTypes(typesRaw)
+		relMap[relType][key] = propMeta{
+			Type:     normalizeValueTypes(typesRaw),
+			Required: allNotNull(typesRaw),
+		}
 	}
 
 	return relMap
@@ -710,15 +976,23 @@ func processSampledRelProperties(records []*neo4j.Record) map[string]map[string]
 
 // normalizeValueTypes converts a list of valueType() strings into the same format
 // used by the primary schema path. When multiple types are observed, they are joined with " | ".
+// Duplicate entries that arise after stripping NOT NULL are collapsed; output is sorted for
+// deterministic comparison across platforms.
 func normalizeValueTypes(raw any) string {
 	types, ok := toStringSlice(raw)
 	if !ok || len(types) == 0 {
 		return "ANY"
 	}
 
+	seen := make(map[string]struct{}, len(types))
 	normalized := make([]string, 0, len(types))
 	for _, t := range types {
-		normalized = append(normalized, normalizeValueType(t))
+		n := normalizeValueType(t)
+		if _, dup := seen[n]; dup {
+			continue
+		}
+		seen[n] = struct{}{}
+		normalized = append(normalized, n)
 	}
 
 	if len(normalized) == 1 {
@@ -733,7 +1007,12 @@ func normalizeValueTypes(raw any) string {
 // valueType() returns standardized Cypher type names (Neo4j 5.x+) such as "STRING", "INTEGER",
 // "ZONED DATETIME", "LIST<FLOAT>", etc. Most pass through unchanged; only the temporal types
 // with spaces need mapping to the underscore-separated format.
+//
+// Any "NOT NULL" existence-constraint suffix (including nested ones inside LIST<...>) is
+// stripped so that types are reported consistently. Required-ness is surfaced via the
+// schema's RequiredProperties field rather than baked into the type string.
 func normalizeValueType(t string) string {
+	t = stripNotNull(t)
 	switch t {
 	case "ZONED DATETIME":
 		return "DATE_TIME"
@@ -785,6 +1064,40 @@ func allInternal(names []string) bool {
 
 // --- Helpers ---
 
+// propMeta is the internal per-property value used by the processing pipeline.
+// It carries both the type string and whether every observation of the property
+// came with a NOT NULL existence constraint. The public schema splits these
+// back into Properties (type map) and RequiredProperties (list of names).
+type propMeta struct {
+	Type     string
+	Required bool
+}
+
+// stripNotNull removes every occurrence of " NOT NULL" from a type string so
+// that types are consistent regardless of existence-constraint status. It
+// handles both outer ("STRING NOT NULL") and nested ("LIST<STRING NOT NULL> NOT NULL")
+// positions, which both Neo4j's db.schema procedures and valueType() can emit.
+func stripNotNull(t string) string {
+	return strings.ReplaceAll(t, " NOT NULL", "")
+}
+
+// allNotNull reports whether every entry in the raw propertyTypes list carries
+// the NOT NULL existence-constraint suffix. A property is treated as required
+// only when every observation of it was constrained — a single nullable
+// observation means the property is genuinely nullable somewhere in the data.
+func allNotNull(raw any) bool {
+	types, ok := toStringSlice(raw)
+	if !ok || len(types) == 0 {
+		return false
+	}
+	for _, t := range types {
+		if !strings.HasSuffix(t, " NOT NULL") {
+			return false
+		}
+	}
+	return true
+}
+
 // cleanRelType strips the ":`...`" formatting from relationship types
 // as returned by db.schema.relTypeProperties().
 // Example: ":`ACTED_IN`" -> "ACTED_IN"
@@ -796,16 +1109,24 @@ func cleanRelType(relType string) string {
 
 // normalizePropertyTypes converts the propertyTypes list from db.schema procedures
 // into a single string representation. When a property has multiple observed types
-// (heterogeneous data), they are joined with " | ".
+// (heterogeneous data), they are joined with " | ". Duplicate entries — which can
+// arise after stripping NOT NULL suffixes (e.g. "String NOT NULL" and "String" both
+// normalise to "STRING") — are collapsed.
 func normalizePropertyTypes(raw any) string {
 	types, ok := toStringSlice(raw)
 	if !ok || len(types) == 0 {
 		return "ANY"
 	}
 
+	seen := make(map[string]struct{}, len(types))
 	normalized := make([]string, 0, len(types))
 	for _, t := range types {
-		normalized = append(normalized, normalizeType(t))
+		n := normalizeType(t)
+		if _, dup := seen[n]; dup {
+			continue
+		}
+		seen[n] = struct{}{}
+		normalized = append(normalized, n)
 	}
 
 	if len(normalized) == 1 {
@@ -818,7 +1139,12 @@ func normalizePropertyTypes(raw any) string {
 // This provides more granularity than the previous APOC-based approach, which reported
 // all list types as just "LIST". The new format distinguishes LIST<STRING> from LIST<FLOAT>,
 // which is particularly useful for identifying vector embedding properties.
+//
+// Any "NOT NULL" existence-constraint suffix is stripped so that the type is reported
+// consistently regardless of constraint status. Required-ness is surfaced separately
+// via NodeSchema.RequiredProperties / RelationshipSchema.RequiredProperties.
 func normalizeType(t string) string {
+	t = stripNotNull(t)
 	switch t {
 	case "String":
 		return "STRING"

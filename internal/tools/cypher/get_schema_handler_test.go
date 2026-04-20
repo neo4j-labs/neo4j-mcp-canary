@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -146,6 +147,11 @@ func getResultText(t *testing.T, result *mcp.CallToolResult) string {
 }
 
 // assertJSONEquals compares two JSON strings for structural equality.
+//
+// If the expected JSON does not include a "metadata" field, any metadata present
+// in the actual JSON is stripped before comparison. This keeps existing tests
+// focused on the schema payload concise; tests that specifically want to assert
+// on metadata can include it in their expected JSON and the check will run normally.
 func assertJSONEquals(t *testing.T, expected, actual string) {
 	t.Helper()
 	var expectedData, actualData any
@@ -155,6 +161,15 @@ func assertJSONEquals(t *testing.T, expected, actual string) {
 	if err := json.Unmarshal([]byte(actual), &actualData); err != nil {
 		t.Fatalf("failed to unmarshal actual JSON: %v\nJSON: %s", err, actual)
 	}
+
+	if expectedMap, ok := expectedData.(map[string]any); ok {
+		if _, wantMeta := expectedMap["metadata"]; !wantMeta {
+			if actualMap, ok := actualData.(map[string]any); ok {
+				delete(actualMap, "metadata")
+			}
+		}
+	}
+
 	expectedFormatted, _ := json.MarshalIndent(expectedData, "", "  ")
 	actualFormatted, _ := json.MarshalIndent(actualData, "", "  ")
 	if string(expectedFormatted) != string(actualFormatted) {
@@ -1514,5 +1529,972 @@ func TestGetSchemaProcessing_RealisticGraphWithVectors(t *testing.T) {
 			{"name": "doc-title-range", "type": "RANGE", "entityType": "NODE", "labelsOrTypes": ["Document"], "properties": ["title"]},
 			{"name": "topic-name-text", "type": "TEXT", "entityType": "NODE", "labelsOrTypes": ["Topic"], "properties": ["name"]}
 		]
+	}`, getResultText(t, result))
+}
+
+// --- SchemaMetadata tests ---
+
+// TestGetSchemaHandler_MetadataFullScan verifies that a successful primary-path
+// response carries metadata identifying it as a full scan. An agent consuming
+// the schema should see metadata.source == "full_scan" and treat the
+// nodes/relationships arrays as complete.
+func TestGetSchemaHandler_MetadataFullScan(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	expectFourQueries(mockDB,
+		[]*neo4j.Record{
+			nodeRecord([]string{"Movie"}, "title", []string{"String"}),
+		},
+		[]*neo4j.Record{},
+		[]*neo4j.Record{},
+		[]*neo4j.Record{},
+		nil, nil, nil, nil,
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+		SchemaTimeout:    30 * time.Second,
+		SchemaSampleSize: 100,
+	}
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	assertJSONEquals(t, `{
+		"nodes": [{"label": "Movie", "properties": {"title": "STRING"}}],
+		"metadata": {"source": "full_scan"}
+	}`, getResultText(t, result))
+}
+
+// TestGetSchemaHandler_MetadataSampled verifies that after the fallback is
+// triggered by a timeout the response carries metadata identifying it as
+// sampled, records the sample size and timeout used, and includes an
+// LLM-readable note warning about potential incompleteness.
+func TestGetSchemaHandler_MetadataSampled(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	analyticsService.EXPECT().IsEnabled().Return(true)
+	analyticsService.EXPECT().NewSchemaTimeoutFallbackEvent(gomock.Any(), gomock.Eq(250))
+	analyticsService.EXPECT().EmitEvent(gomock.Any())
+
+	gomock.InOrder(
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(nil, fmt.Errorf("context deadline exceeded")),
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{
+				sampledNodeRecord("Movie", "title", []string{"STRING"}),
+			}, nil),
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{}, nil),
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{}, nil),
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{}, nil),
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+		SchemaTimeout:    1 * time.Nanosecond,
+		SchemaSampleSize: 250,
+	}
+
+	time.Sleep(time.Millisecond)
+
+	handler := cypher.GetSchemaHandler(deps, 250)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	// Parse the response and check the metadata fields individually. We don't
+	// assert on the note verbatim because it includes the exact timeout value
+	// formatted as a float, which is brittle under refactors.
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(getResultText(t, result)), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	meta, ok := resp["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected metadata object in response, got: %v", resp["metadata"])
+	}
+	if got, want := meta["source"], "sampled"; got != want {
+		t.Errorf("metadata.source = %v, want %v", got, want)
+	}
+	if got, want := meta["sampleSize"], float64(250); got != want {
+		t.Errorf("metadata.sampleSize = %v, want %v", got, want)
+	}
+	if _, ok := meta["timeoutSeconds"]; !ok {
+		t.Errorf("expected metadata.timeoutSeconds to be present")
+	}
+	note, ok := meta["note"].(string)
+	if !ok || note == "" {
+		t.Errorf("expected non-empty metadata.note, got: %v", meta["note"])
+	}
+	// Spot-check that the note mentions the key guidance — cross-checking via indexes —
+	// so an LLM has a concrete remediation strategy in-band.
+	if !strings.Contains(note, "indexes") {
+		t.Errorf("expected metadata.note to reference the indexes array for cross-checking; got: %q", note)
+	}
+}
+
+// --- Completeness heuristic tests ---
+//
+// These exercise populateMetadataHeuristics: the check that compares labels and
+// relationship types referenced by the indexes array against those present in
+// the main nodes and relationships arrays, to catch silent incompleteness even
+// when no timeout fired.
+
+// TestGetSchemaHandler_HeuristicDetectsMissingNodeLabels simulates the Companies
+// House case: db.schema.nodeTypeProperties() succeeds (no timeout) but returns
+// only one label, while SHOW INDEXES reveals many more. The heuristic must
+// flag the discrepancy via metadata.missingNodeLabels even though source is
+// "full_scan".
+func TestGetSchemaHandler_HeuristicDetectsMissingNodeLabels(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	expectFourQueries(mockDB,
+		// Primary path returns only SICCode, mimicking the observed buggy behaviour
+		// on the UK Companies House graph.
+		[]*neo4j.Record{
+			nodeRecord([]string{"SICCode"}, "code", []string{"String"}),
+		},
+		[]*neo4j.Record{},
+		[]*neo4j.Record{},
+		// Indexes reveal the labels that db.schema failed to surface.
+		[]*neo4j.Record{
+			indexRecord("co_number", "RANGE", "NODE",
+				[]string{"Company"}, []string{"companyNumber"}, map[string]any{}),
+			indexRecord("person_name", "RANGE", "NODE",
+				[]string{"Person"}, []string{"chName"}, map[string]any{}),
+			indexRecord("addr_postcode", "RANGE", "NODE",
+				[]string{"Address"}, []string{"postCode"}, map[string]any{}),
+			indexRecord("sic_code", "RANGE", "NODE",
+				[]string{"SICCode"}, []string{"code"}, map[string]any{}),
+		},
+		nil, nil, nil, nil,
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+		SchemaTimeout:    30 * time.Second,
+		SchemaSampleSize: 100,
+	}
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(getResultText(t, result)), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	meta, ok := resp["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected metadata object, got: %v", resp["metadata"])
+	}
+
+	if got, want := meta["source"], "full_scan"; got != want {
+		t.Errorf("metadata.source = %v, want %v", got, want)
+	}
+
+	missingRaw, ok := meta["missingNodeLabels"].([]any)
+	if !ok {
+		t.Fatalf("expected missingNodeLabels array, got: %v", meta["missingNodeLabels"])
+	}
+	missing := make([]string, len(missingRaw))
+	for i, v := range missingRaw {
+		missing[i], _ = v.(string)
+	}
+	// Expected: Address, Company, Person (sorted). SICCode present, excluded.
+	want := []string{"Address", "Company", "Person"}
+	if fmt.Sprintf("%v", missing) != fmt.Sprintf("%v", want) {
+		t.Errorf("missingNodeLabels = %v, want %v", missing, want)
+	}
+
+	note, _ := meta["note"].(string)
+	if note == "" {
+		t.Errorf("expected non-empty note when heuristic fires, got empty")
+	}
+	for _, expected := range []string{"Address", "Company", "Person", "MATCH"} {
+		if !strings.Contains(note, expected) {
+			t.Errorf("expected note to mention %q; got: %q", expected, note)
+		}
+	}
+	// The note should NOT include the sampled-path preamble because this was a full scan.
+	if strings.Contains(note, "sample of") {
+		t.Errorf("did not expect sampled-path wording on full_scan path; got: %q", note)
+	}
+}
+
+// TestGetSchemaHandler_HeuristicDetectsMissingRelTypes verifies the relationship-side
+// half of the heuristic: a relationship type that appears in a RELATIONSHIP-type
+// index but not in the relationships array is flagged.
+func TestGetSchemaHandler_HeuristicDetectsMissingRelTypes(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	expectFourQueries(mockDB,
+		[]*neo4j.Record{
+			nodeRecord([]string{"Company"}, "name", []string{"String"}),
+		},
+		// relProperties returns only OFFICER_OF — CONTROLS and PSC_OF are "missing".
+		[]*neo4j.Record{
+			relRecord(":`OFFICER_OF`", "resignedDate", []string{"Date"}),
+		},
+		[]*neo4j.Record{
+			patternRecord("Company", "OFFICER_OF", "Company"),
+		},
+		// Indexes reveal CONTROLS and PSC_OF rel types that were not returned above.
+		[]*neo4j.Record{
+			indexRecord("officer_resigned", "RANGE", "RELATIONSHIP",
+				[]string{"OFFICER_OF"}, []string{"resignedDate"}, map[string]any{}),
+			indexRecord("controls_ownership", "RANGE", "RELATIONSHIP",
+				[]string{"CONTROLS"}, []string{"ownershipMin"}, map[string]any{}),
+			indexRecord("psc_ceased", "RANGE", "RELATIONSHIP",
+				[]string{"PSC_OF"}, []string{"ceasedDate"}, map[string]any{}),
+		},
+		nil, nil, nil, nil,
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+		SchemaTimeout:    30 * time.Second,
+		SchemaSampleSize: 100,
+	}
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(getResultText(t, result)), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	meta, _ := resp["metadata"].(map[string]any)
+
+	missingRaw, ok := meta["missingRelTypes"].([]any)
+	if !ok {
+		t.Fatalf("expected missingRelTypes array, got: %v", meta["missingRelTypes"])
+	}
+	missing := make([]string, len(missingRaw))
+	for i, v := range missingRaw {
+		missing[i], _ = v.(string)
+	}
+	want := []string{"CONTROLS", "PSC_OF"}
+	if fmt.Sprintf("%v", missing) != fmt.Sprintf("%v", want) {
+		t.Errorf("missingRelTypes = %v, want %v", missing, want)
+	}
+
+	// missingNodeLabels should be absent (or empty) since Company is covered.
+	if v, ok := meta["missingNodeLabels"]; ok {
+		if arr, _ := v.([]any); len(arr) != 0 {
+			t.Errorf("expected no missingNodeLabels; got: %v", v)
+		}
+	}
+}
+
+// TestGetSchemaHandler_HeuristicQuietWhenComplete confirms that a clean full
+// scan with indexes that reference only already-present labels produces an
+// empty Note and no Missing* fields, so the agent isn't nagged when the
+// schema really is complete.
+func TestGetSchemaHandler_HeuristicQuietWhenComplete(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	expectFourQueries(mockDB,
+		[]*neo4j.Record{
+			nodeRecord([]string{"Movie"}, "title", []string{"String"}),
+			nodeRecord([]string{"Person"}, "name", []string{"String"}),
+		},
+		[]*neo4j.Record{
+			relRecord(":`ACTED_IN`", "roles", []string{"StringArray"}),
+		},
+		[]*neo4j.Record{
+			patternRecord("Person", "ACTED_IN", "Movie"),
+		},
+		[]*neo4j.Record{
+			indexRecord("movie_title", "RANGE", "NODE",
+				[]string{"Movie"}, []string{"title"}, map[string]any{}),
+			indexRecord("person_name", "RANGE", "NODE",
+				[]string{"Person"}, []string{"name"}, map[string]any{}),
+			indexRecord("acted_roles", "RANGE", "RELATIONSHIP",
+				[]string{"ACTED_IN"}, []string{"roles"}, map[string]any{}),
+		},
+		nil, nil, nil, nil,
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+		SchemaTimeout:    30 * time.Second,
+		SchemaSampleSize: 100,
+	}
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(getResultText(t, result)), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	meta, _ := resp["metadata"].(map[string]any)
+
+	if got, want := meta["source"], "full_scan"; got != want {
+		t.Errorf("metadata.source = %v, want %v", got, want)
+	}
+	if _, hasMissing := meta["missingNodeLabels"]; hasMissing {
+		t.Errorf("expected no missingNodeLabels on a complete schema; got: %v", meta["missingNodeLabels"])
+	}
+	if _, hasMissing := meta["missingRelTypes"]; hasMissing {
+		t.Errorf("expected no missingRelTypes on a complete schema; got: %v", meta["missingRelTypes"])
+	}
+	if note, ok := meta["note"]; ok && note != "" {
+		t.Errorf("expected empty note on a complete full scan; got: %q", note)
+	}
+}
+
+// TestGetSchemaHandler_HeuristicSampledWithMissing confirms that when BOTH the
+// sampled-path caveat and the completeness heuristic apply, the Note combines
+// them rather than showing only one.
+func TestGetSchemaHandler_HeuristicSampledWithMissing(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	analyticsService.EXPECT().IsEnabled().Return(true)
+	analyticsService.EXPECT().NewSchemaTimeoutFallbackEvent(gomock.Any(), gomock.Eq(100))
+	analyticsService.EXPECT().EmitEvent(gomock.Any())
+
+	gomock.InOrder(
+		// Primary fails → fallback
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(nil, fmt.Errorf("context deadline exceeded")),
+		// Sampled node props — only Movie is found.
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{
+				sampledNodeRecord("Movie", "title", []string{"STRING"}),
+			}, nil),
+		// Sampled rel props — empty.
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{}, nil),
+		// Sampled rel patterns — empty.
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{}, nil),
+		// Indexes — reveal Person, which the sample missed.
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{
+				indexRecord("movie_title", "RANGE", "NODE",
+					[]string{"Movie"}, []string{"title"}, map[string]any{}),
+				indexRecord("person_name", "RANGE", "NODE",
+					[]string{"Person"}, []string{"name"}, map[string]any{}),
+			}, nil),
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+		SchemaTimeout:    1 * time.Nanosecond,
+		SchemaSampleSize: 100,
+	}
+
+	time.Sleep(time.Millisecond)
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(getResultText(t, result)), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	meta, _ := resp["metadata"].(map[string]any)
+
+	if got, want := meta["source"], "sampled"; got != want {
+		t.Errorf("metadata.source = %v, want %v", got, want)
+	}
+
+	missingRaw, ok := meta["missingNodeLabels"].([]any)
+	if !ok || len(missingRaw) != 1 || missingRaw[0] != "Person" {
+		t.Errorf("expected missingNodeLabels=[Person], got: %v", meta["missingNodeLabels"])
+	}
+
+	note, _ := meta["note"].(string)
+	if !strings.Contains(note, "sample of") {
+		t.Errorf("expected note to include sampled-path preamble; got: %q", note)
+	}
+	if !strings.Contains(note, "Person") {
+		t.Errorf("expected note to mention missing label Person; got: %q", note)
+	}
+}
+
+// TestGetSchemaHandler_HeuristicIgnoresInternalLabels confirms that Bloom
+// labels referenced by an index do not count as "missing" — they're filtered
+// from both the nodes array and the heuristic, so they shouldn't fire a
+// false-positive warning.
+func TestGetSchemaHandler_HeuristicIgnoresInternalLabels(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	expectFourQueries(mockDB,
+		[]*neo4j.Record{
+			nodeRecord([]string{"Movie"}, "title", []string{"String"}),
+		},
+		[]*neo4j.Record{},
+		[]*neo4j.Record{},
+		[]*neo4j.Record{
+			indexRecord("movie_title", "RANGE", "NODE",
+				[]string{"Movie"}, []string{"title"}, map[string]any{}),
+			// Bloom index — already filtered from the indexes output by allInternal,
+			// so it should not even reach the heuristic. Included here for belt-and-braces.
+			indexRecord("bloom_perspective_id", "RANGE", "NODE",
+				[]string{"_Bloom_Perspective_"}, []string{"id"}, map[string]any{}),
+		},
+		nil, nil, nil, nil,
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+		SchemaTimeout:    30 * time.Second,
+		SchemaSampleSize: 100,
+	}
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(getResultText(t, result)), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	meta, _ := resp["metadata"].(map[string]any)
+
+	if _, hasMissing := meta["missingNodeLabels"]; hasMissing {
+		t.Errorf("expected no missingNodeLabels when only internal labels are indexed; got: %v",
+			meta["missingNodeLabels"])
+	}
+	if note, ok := meta["note"]; ok && note != "" {
+		t.Errorf("expected empty note; got: %q", note)
+	}
+}
+
+// --- Stratified sampling query tests ---
+
+// TestGetSchemaHandler_SamplingQueriesUsePerEntityStratification locks in the
+// stratified-sampling strategy: the three sampling queries must enumerate
+// labels/types via db.labels() and db.relationshipTypes() and take a bounded
+// sample per entity, rather than `MATCH (n) LIMIT k` over the whole graph.
+// This guards against a regression back to storage-order bias.
+func TestGetSchemaHandler_SamplingQueriesUsePerEntityStratification(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	analyticsService.EXPECT().IsEnabled().Return(true)
+	analyticsService.EXPECT().NewSchemaTimeoutFallbackEvent(gomock.Any(), gomock.Any())
+	analyticsService.EXPECT().EmitEvent(gomock.Any())
+
+	var capturedQueries []string
+	capture := func(_ context.Context, q string, _ map[string]any) ([]*neo4j.Record, error) {
+		capturedQueries = append(capturedQueries, q)
+		return []*neo4j.Record{}, nil
+	}
+
+	gomock.InOrder(
+		// Primary fails → triggers fallback
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(nil, fmt.Errorf("context deadline exceeded")),
+		// Sampled node properties — capture the query text
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, q string, p map[string]any) ([]*neo4j.Record, error) {
+				capturedQueries = append(capturedQueries, q)
+				return []*neo4j.Record{
+					sampledNodeRecord("Movie", "title", []string{"STRING"}),
+				}, nil
+			}),
+		// Sampled rel properties — capture
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			DoAndReturn(capture),
+		// Sampled patterns — capture
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			DoAndReturn(capture),
+		// Indexes — don't care about content
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{}, nil),
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+		SchemaTimeout:    1 * time.Nanosecond,
+		SchemaSampleSize: 100,
+	}
+
+	time.Sleep(time.Millisecond)
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	if len(capturedQueries) != 3 {
+		t.Fatalf("expected 3 sampling queries to be captured, got %d", len(capturedQueries))
+	}
+
+	nodeQ, relPropQ, patternQ := capturedQueries[0], capturedQueries[1], capturedQueries[2]
+
+	// Node sampling must enumerate labels and use a CALL subquery per label.
+	for _, wantSubstring := range []string{"db.labels()", "CALL {", "WITH label", "LIMIT $sampleSize"} {
+		if !strings.Contains(nodeQ, wantSubstring) {
+			t.Errorf("node sampling query missing %q; got:\n%s", wantSubstring, nodeQ)
+		}
+	}
+	// And must NOT be the old storage-order form.
+	if strings.Contains(nodeQ, "MATCH (n)\n\t\tWITH n LIMIT") {
+		t.Errorf("node sampling query still looks storage-order biased:\n%s", nodeQ)
+	}
+
+	// Rel properties sampling must enumerate relationship types and use a CALL subquery.
+	for _, wantSubstring := range []string{"db.relationshipTypes()", "CALL {", "WITH relationshipType", "LIMIT $sampleSize"} {
+		if !strings.Contains(relPropQ, wantSubstring) {
+			t.Errorf("rel properties sampling query missing %q; got:\n%s", wantSubstring, relPropQ)
+		}
+	}
+
+	// Pattern sampling must enumerate relationship types and sample per type.
+	for _, wantSubstring := range []string{"db.relationshipTypes()", "CALL {", "WITH relationshipType", "LIMIT $sampleSize"} {
+		if !strings.Contains(patternQ, wantSubstring) {
+			t.Errorf("pattern sampling query missing %q; got:\n%s", wantSubstring, patternQ)
+		}
+	}
+}
+
+// TestGetSchemaHandler_StratifiedSamplingCoversAllEntities verifies the end-to-end
+// behaviour: when the mocked sample returns data for several labels and rel types,
+// all of them appear in the schema. This is the happy-path equivalent of what
+// stratified sampling should produce on a skewed real graph — rare entities get
+// their own budget rather than being starved by a dominant one.
+func TestGetSchemaHandler_StratifiedSamplingCoversAllEntities(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	analyticsService.EXPECT().IsEnabled().Return(true)
+	analyticsService.EXPECT().NewSchemaTimeoutFallbackEvent(gomock.Any(), gomock.Any())
+	analyticsService.EXPECT().EmitEvent(gomock.Any())
+
+	gomock.InOrder(
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(nil, fmt.Errorf("context deadline exceeded")),
+		// Per-label sampling returns records for a dominant label AND several rare ones.
+		// On the old storage-order sampling this is exactly the case that would have
+		// dropped the rare labels.
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{
+				sampledNodeRecord("Company", "name", []string{"STRING"}),
+				sampledNodeRecord("Company", "companyNumber", []string{"STRING"}),
+				sampledNodeRecord("Address", "postCode", []string{"STRING"}),
+				sampledNodeRecord("Person", "chName", []string{"STRING"}),
+				sampledNodeRecord("Lender", "name", []string{"STRING"}),
+				sampledNodeRecord("SICCode", "code", []string{"STRING"}),
+			}, nil),
+		// Per-type rel sampling returns multiple rel types.
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{
+				sampledRelRecord("CONTROLS", "ownershipMin", []string{"FLOAT"}),
+				sampledRelRecord("OFFICER_OF", "resignedDate", []string{"DATE"}),
+				sampledRelRecord("PSC_OF", "ceasedDate", []string{"DATE"}),
+			}, nil),
+		// Patterns.
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{
+				patternRecord("Person", "OFFICER_OF", "Company"),
+				patternRecord("Person", "CONTROLS", "Company"),
+				patternRecord("Person", "PSC_OF", "Company"),
+			}, nil),
+		// Indexes.
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{}, nil),
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+		SchemaTimeout:    1 * time.Nanosecond,
+		SchemaSampleSize: 100,
+	}
+
+	time.Sleep(time.Millisecond)
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(getResultText(t, result)), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	// Extract label names from the nodes array and confirm all five are present.
+	nodesRaw, _ := resp["nodes"].([]any)
+	gotLabels := make(map[string]bool, len(nodesRaw))
+	for _, n := range nodesRaw {
+		if m, ok := n.(map[string]any); ok {
+			if label, ok := m["label"].(string); ok {
+				gotLabels[label] = true
+			}
+		}
+	}
+	for _, want := range []string{"Company", "Address", "Person", "Lender", "SICCode"} {
+		if !gotLabels[want] {
+			t.Errorf("expected label %q in nodes; got labels: %v", want, gotLabels)
+		}
+	}
+
+	// And all three relationship types.
+	relsRaw, _ := resp["relationships"].([]any)
+	gotRelTypes := make(map[string]bool, len(relsRaw))
+	for _, r := range relsRaw {
+		if m, ok := r.(map[string]any); ok {
+			if relType, ok := m["type"].(string); ok {
+				gotRelTypes[relType] = true
+			}
+		}
+	}
+	for _, want := range []string{"CONTROLS", "OFFICER_OF", "PSC_OF"} {
+		if !gotRelTypes[want] {
+			t.Errorf("expected rel type %q in relationships; got: %v", want, gotRelTypes)
+		}
+	}
+}
+
+// --- NOT NULL constraint surfacing tests ---
+//
+// These exercise the split between the "STRING NOT NULL" raw form (which Neo4j's
+// db.schema procedures and valueType() both emit when a property has an existence
+// constraint) and the public schema shape: a clean type string in Properties plus
+// a separate RequiredProperties list naming the constrained properties.
+
+// TestGetSchemaHandler_PrimaryPathSurfacesRequiredProperties verifies that the
+// primary path strips NOT NULL from the type string and adds the property name
+// to RequiredProperties.
+func TestGetSchemaHandler_PrimaryPathSurfacesRequiredProperties(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	expectFourQueries(mockDB,
+		[]*neo4j.Record{
+			// Constrained: both observations NOT NULL → required
+			nodeRecord([]string{"Company"}, "companyNumber", []string{"String NOT NULL"}),
+			// Unconstrained: no NOT NULL
+			nodeRecord([]string{"Company"}, "name", []string{"String"}),
+		},
+		[]*neo4j.Record{},
+		[]*neo4j.Record{},
+		[]*neo4j.Record{},
+		nil, nil, nil, nil,
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+	}
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	// Types in Properties should be clean; RequiredProperties should list only companyNumber.
+	assertJSONEquals(t, `{
+		"nodes": [{
+			"label": "Company",
+			"properties": {"companyNumber": "STRING", "name": "STRING"},
+			"requiredProperties": ["companyNumber"]
+		}]
+	}`, getResultText(t, result))
+}
+
+// TestGetSchemaHandler_SamplingPathSurfacesRequiredProperties verifies the same
+// behaviour for the sampling fallback, where types come from valueType() and
+// may also include the NOT NULL suffix — including nested inside LIST<...>.
+func TestGetSchemaHandler_SamplingPathSurfacesRequiredProperties(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	analyticsService.EXPECT().IsEnabled().Return(true)
+	analyticsService.EXPECT().NewSchemaTimeoutFallbackEvent(gomock.Any(), gomock.Any())
+	analyticsService.EXPECT().EmitEvent(gomock.Any())
+
+	gomock.InOrder(
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(nil, fmt.Errorf("context deadline exceeded")),
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{
+				// Constrained scalar
+				sampledNodeRecord("Company", "companyNumber", []string{"STRING NOT NULL"}),
+				// Constrained list with constrained element (both NOT NULLs must be stripped)
+				sampledNodeRecord("Company", "riskFlags", []string{"LIST<STRING NOT NULL> NOT NULL"}),
+				// Unconstrained
+				sampledNodeRecord("Company", "name", []string{"STRING"}),
+			}, nil),
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{}, nil),
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{}, nil),
+		mockDB.EXPECT().
+			ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([]*neo4j.Record{}, nil),
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+		SchemaTimeout:    1 * time.Nanosecond,
+		SchemaSampleSize: 100,
+	}
+
+	time.Sleep(time.Millisecond)
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(getResultText(t, result)), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	nodes, _ := resp["nodes"].([]any)
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+	company, _ := nodes[0].(map[string]any)
+
+	props, _ := company["properties"].(map[string]any)
+	for name, wantType := range map[string]string{
+		"companyNumber": "STRING",
+		"name":          "STRING",
+		"riskFlags":     "LIST<STRING>",
+	} {
+		if got := props[name]; got != wantType {
+			t.Errorf("properties[%q] = %v, want %v (NOT NULL should be stripped)", name, got, wantType)
+		}
+	}
+
+	requiredRaw, ok := company["requiredProperties"].([]any)
+	if !ok {
+		t.Fatalf("expected requiredProperties array, got: %v", company["requiredProperties"])
+	}
+	required := make([]string, len(requiredRaw))
+	for i, v := range requiredRaw {
+		required[i], _ = v.(string)
+	}
+	// Expected: companyNumber and riskFlags (both constrained), sorted; name is nullable
+	want := []string{"companyNumber", "riskFlags"}
+	if fmt.Sprintf("%v", required) != fmt.Sprintf("%v", want) {
+		t.Errorf("requiredProperties = %v, want %v", required, want)
+	}
+}
+
+// TestGetSchemaHandler_HeterogeneousNotNullNotRequired verifies the semantic
+// choice: a property is only flagged as required when EVERY observed type for
+// it carries NOT NULL. A mixed observation — some with the constraint, some
+// without — means the property is genuinely nullable in at least one place
+// and must not be flagged as required.
+func TestGetSchemaHandler_HeterogeneousNotNullNotRequired(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	expectFourQueries(mockDB,
+		[]*neo4j.Record{
+			// Heterogeneous types AND mixed constraint status:
+			// "Long NOT NULL" is constrained, "String" is not. The presence of a
+			// nullable observation (String) means the property is not required;
+			// the types still combine as "INTEGER | STRING" after NOT NULL stripping.
+			nodeRecord([]string{"Thing"}, "value", []string{"Long NOT NULL", "String"}),
+		},
+		[]*neo4j.Record{},
+		[]*neo4j.Record{},
+		[]*neo4j.Record{},
+		nil, nil, nil, nil,
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+	}
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	// requiredProperties should be absent (nil → omitempty). Types are stripped of
+	// NOT NULL and joined with " | " preserving their original order.
+	assertJSONEquals(t, `{
+		"nodes": [{
+			"label": "Thing",
+			"properties": {"value": "INTEGER | STRING"}
+		}]
+	}`, getResultText(t, result))
+}
+
+// TestGetSchemaHandler_RelationshipRequiredProperties is the relationship-side
+// mirror of the primary-path test. Relationship properties can also carry
+// existence constraints; the split into Properties + RequiredProperties must
+// apply symmetrically to RelationshipSchema.
+func TestGetSchemaHandler_RelationshipRequiredProperties(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	analyticsService := analytics.NewMockService(ctrl)
+	mockDB := db.NewMockService(ctrl)
+
+	expectFourQueries(mockDB,
+		[]*neo4j.Record{
+			nodeRecord([]string{"Company"}, "name", []string{"String"}),
+		},
+		[]*neo4j.Record{
+			relRecord(":`CONTROLS`", "ownershipMin", []string{"Long NOT NULL"}),
+			relRecord(":`CONTROLS`", "kind", []string{"String"}),
+		},
+		[]*neo4j.Record{
+			patternRecord("Company", "CONTROLS", "Company"),
+		},
+		[]*neo4j.Record{},
+		nil, nil, nil, nil,
+	)
+
+	deps := &tools.ToolDependencies{
+		DBService:        mockDB,
+		AnalyticsService: analyticsService,
+	}
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", getResultText(t, result))
+	}
+
+	assertJSONEquals(t, `{
+		"nodes": [{"label": "Company", "properties": {"name": "STRING"}}],
+		"relationships": [{
+			"type": "CONTROLS",
+			"from": "Company",
+			"to": "Company",
+			"properties": {"ownershipMin": "INTEGER", "kind": "STRING"},
+			"requiredProperties": ["ownershipMin"]
+		}]
 	}`, getResultText(t, result))
 }

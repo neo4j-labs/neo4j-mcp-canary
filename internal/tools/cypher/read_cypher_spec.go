@@ -8,8 +8,17 @@ import (
 )
 
 type ReadCypherInput struct {
-	Query  string `json:"query" jsonschema:"default=MATCH(n) RETURN n,description=The Cypher query to execute"`
-	Params Params `json:"params,omitempty" jsonschema:"default={},description=Parameters to pass to the Cypher query"`
+	// No jsonschema default on Query: a default value would let a naive client auto-fill
+	// the query field, which on a large graph would silently execute a costly full scan.
+	// The handler already validates that Query is non-empty and returns a friendly error
+	// when it isn't, so no default is needed.
+	Query string `json:"query" jsonschema:"description=The read-only Cypher query to execute. Required."`
+
+	// No jsonschema default on Params: the field is optional (omitempty) and omitted
+	// entirely when the query has no $-placeholders. Advertising an empty-object default
+	// risks some schema libraries serialising it as the string "{}", which would then
+	// fail to unmarshal on the server side.
+	Params Params `json:"params,omitempty" jsonschema:"description=Optional parameters to bind to $-placeholders in the query. Must be a JSON object. Omit when the query has no placeholders."`
 }
 
 func ReadCypherSpec() mcp.Tool {

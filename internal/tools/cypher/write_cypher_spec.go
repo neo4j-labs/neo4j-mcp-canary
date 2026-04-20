@@ -8,8 +8,13 @@ import (
 )
 
 type WriteCypherInput struct {
-	Query  string `json:"query" jsonschema:"default=MATCH(n) RETURN n,description=The Cypher query to execute"`
-	Params Params `json:"params,omitempty" jsonschema:"default={},description=Parameters to pass to the Cypher query"`
+	// No jsonschema default on Query — see rationale on ReadCypherInput.Query.
+	// Especially important for write-cypher, where an auto-filled default could trigger
+	// an unintended mutation.
+	Query string `json:"query" jsonschema:"description=The Cypher query to execute. Required. May contain write operations (CREATE, MERGE, DELETE, SET) and schema or admin commands."`
+
+	// No jsonschema default on Params — see rationale on ReadCypherInput.Params.
+	Params Params `json:"params,omitempty" jsonschema:"description=Optional parameters to bind to $-placeholders in the query. Must be a JSON object. Omit when the query has no placeholders."`
 }
 
 func WriteCypherSpec() mcp.Tool {

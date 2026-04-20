@@ -317,6 +317,118 @@ func TestBindArgumentsErrorHandling(t *testing.T) {
 	})
 }
 
+// TestParamsStringifiedRecovery covers the recovery path in Params.UnmarshalJSON
+// for clients that pass the params value as a JSON-encoded string instead of as
+// a JSON object. This happens in the wild with some LLM-driven MCP clients that
+// stringify structured tool arguments.
+func TestParamsStringifiedRecovery(t *testing.T) {
+	tests := []struct {
+		name       string
+		stringVal  string
+		wantParams cypher.Params
+	}{
+		{
+			name:       "empty object",
+			stringVal:  "{}",
+			wantParams: cypher.Params{},
+		},
+		{
+			name:       "simple integer parameter",
+			stringVal:  `{"id": 1}`,
+			wantParams: cypher.Params{"id": int64(1)},
+		},
+		{
+			name:       "mixed types with nested structure",
+			stringVal:  `{"name": "Alice", "age": 30, "tags": ["a", "b"]}`,
+			wantParams: cypher.Params{"name": "Alice", "age": int64(30), "tags": []any{"a", "b"}},
+		},
+		{
+			// Subtle but correct: when the literal string "10.0" arrives via the recovery path,
+			// json.Number("10.0").Int64() fails on the decimal point, so ConvertNumbers falls
+			// through to Float64 and returns float64(10). The normal object path would instead
+			// see `10` on the wire (Go's encoding/json drops trailing .0 when marshalling a
+			// whole-number float64) and produce int64(10). Both are correct within their own
+			// path — this case documents the recovery-path behaviour so the asymmetry doesn't
+			// surprise anyone later.
+			name:       "whole-number float stays float after recovery",
+			stringVal:  `{"ratio": 1.5, "whole": 10.0}`,
+			wantParams: cypher.Params{"ratio": float64(1.5), "whole": float64(10)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := mcp.CallToolRequest{
+				Params: mcp.CallToolParams{
+					Arguments: map[string]any{
+						"query":  "MATCH (n) RETURN n",
+						"params": tt.stringVal, // string, simulating the client's double-encoding mistake
+					},
+				},
+			}
+
+			var args cypher.ReadCypherInput
+			err := request.BindArguments(&args)
+
+			require.NoError(t, err, "recovery path should succeed for stringified object")
+			assert.Equal(t, "MATCH (n) RETURN n", args.Query)
+			assert.Equal(t, tt.wantParams, args.Params)
+		})
+	}
+}
+
+// TestParamsFriendlyError covers the failure cases — payloads that are neither
+// a JSON object nor a JSON string containing an object. The error must be
+// readable enough for an LLM to self-correct, naming the expected shape and
+// showing what it received.
+func TestParamsFriendlyError(t *testing.T) {
+	tests := []struct {
+		name      string
+		paramsVal any
+	}{
+		{
+			name:      "number instead of object",
+			paramsVal: 42,
+		},
+		{
+			name:      "boolean instead of object",
+			paramsVal: true,
+		},
+		{
+			name:      "array instead of object",
+			paramsVal: []any{1, 2, 3},
+		},
+		{
+			name:      "string that is not valid JSON",
+			paramsVal: "not valid json",
+		},
+		{
+			name:      "string that parses as JSON but not as object",
+			paramsVal: "[1, 2, 3]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := mcp.CallToolRequest{
+				Params: mcp.CallToolParams{
+					Arguments: map[string]any{
+						"query":  "MATCH (n) RETURN n",
+						"params": tt.paramsVal,
+					},
+				},
+			}
+
+			var args cypher.ReadCypherInput
+			err := request.BindArguments(&args)
+
+			require.Error(t, err, "should error for non-object non-string-object params")
+			assert.Contains(t, err.Error(), "must be a JSON object",
+				"error should name the expected shape; got: %v", err)
+		})
+	}
+}
+
 func TestConvertNumbers(t *testing.T) {
 	tests := []struct {
 		name     string
