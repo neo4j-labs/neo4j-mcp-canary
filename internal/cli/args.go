@@ -14,10 +14,10 @@ import (
 // osExit is a variable that can be mocked in tests
 var osExit = os.Exit
 
-const helpText = `neo4j-mcp - Neo4j Model Context Protocol Server
+const helpText = `neo4j-mcp-canary - Neo4j Model Context Protocol Canary Server
 
 Usage:
-  neo4j-mcp [OPTIONS]
+  neo4j-mcp-canary [OPTIONS]
 
 Options:
   -h, --help                          Show this help message
@@ -76,12 +76,12 @@ Optional Environment Variables:
 
   Examples:
   # Using environment variables
-  NEO4J_URI=bolt://localhost:7687 NEO4J_USERNAME=neo4j NEO4J_PASSWORD=password neo4j-mcp
+  NEO4J_URI=bolt://localhost:7687 NEO4J_USERNAME=neo4j NEO4J_PASSWORD=password neo4j-mcp-canary
 
   # Using CLI flags (takes precedence over environment variables)
-  neo4j-mcp --neo4j-uri bolt://localhost:7687 --neo4j-username neo4j --neo4j-password password
+  neo4j-mcp-canary --neo4j-uri bolt://localhost:7687 --neo4j-username neo4j --neo4j-password password
 
-For more information, visit: https://github.com/neo4j/mcp
+For more information, visit: https://github.com/neo4j-labs/neo4j-mcp-canary
 `
 
 // Args holds configuration values parsed from command-line flags
@@ -268,7 +268,7 @@ func HandleArgs(version string) {
 	}
 
 	if flags["version"] {
-		fmt.Printf("neo4j-mcp version: %s\n", version)
+		fmt.Printf("neo4j-mcp-canary version: %s\n", version)
 		osExit(0)
 	}
 }

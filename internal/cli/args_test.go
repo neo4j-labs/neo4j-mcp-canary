@@ -12,9 +12,9 @@ import (
 
 const (
 	testVersion     = "1.0.0"
-	testProgramName = "neo4j-mcp"
-	testHelpText    = "neo4j-mcp - Neo4j Model Context Protocol Server"
-	testVersionText = "neo4j-mcp version: 1.0.0"
+	testProgramName = "neo4j-mcp-canary"
+	testHelpText    = "neo4j-mcp-canary - Neo4j Model Context Protocol Canary Server"
+	testVersionText = "neo4j-mcp-canary version: 1.0.0"
 )
 
 // captureOutput temporarily redirects stdout and stderr to capture output.
