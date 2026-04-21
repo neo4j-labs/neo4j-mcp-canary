@@ -379,70 +379,6 @@ func TestLoadConfig_ValidIntValue(t *testing.T) {
 	})
 }
 
-func TestLoadConfig_SchemaTimeout(t *testing.T) {
-	// Set required env variables
-	t.Setenv("NEO4J_TRANSPORT_MODE", "stdio")
-	t.Setenv("NEO4J_URI", "bolt://localhost:7687")
-	t.Setenv("NEO4J_USERNAME", "testuser")
-	t.Setenv("NEO4J_PASSWORD", "testpass")
-
-	t.Run("default value", func(t *testing.T) {
-		t.Setenv("NEO4J_SCHEMA_TIMEOUT", "")
-
-		cfg, err := LoadConfig(nil)
-		if err != nil {
-			t.Fatalf("LoadConfig() unexpected error: %v", err)
-		}
-
-		if cfg.SchemaTimeoutSeconds != DefaultSchemaTimeoutSeconds {
-			t.Errorf("LoadConfig() SchemaTimeoutSeconds = %v, want %v", cfg.SchemaTimeoutSeconds, DefaultSchemaTimeoutSeconds)
-		}
-	})
-
-	t.Run("value from env", func(t *testing.T) {
-		t.Setenv("NEO4J_SCHEMA_TIMEOUT", "60")
-
-		cfg, err := LoadConfig(nil)
-		if err != nil {
-			t.Fatalf("LoadConfig() unexpected error: %v", err)
-		}
-
-		if cfg.SchemaTimeoutSeconds != 60 {
-			t.Errorf("LoadConfig() SchemaTimeoutSeconds = %v, want 60", cfg.SchemaTimeoutSeconds)
-		}
-	})
-
-	t.Run("zero disables timeout", func(t *testing.T) {
-		t.Setenv("NEO4J_SCHEMA_TIMEOUT", "0")
-
-		cfg, err := LoadConfig(nil)
-		if err != nil {
-			t.Fatalf("LoadConfig() unexpected error: %v", err)
-		}
-
-		if cfg.SchemaTimeoutSeconds != 0 {
-			t.Errorf("LoadConfig() SchemaTimeoutSeconds = %v, want 0", cfg.SchemaTimeoutSeconds)
-		}
-	})
-
-	t.Run("CLI override takes precedence", func(t *testing.T) {
-		t.Setenv("NEO4J_SCHEMA_TIMEOUT", "10")
-
-		overrides := &CLIOverrides{
-			SchemaTimeout: "45",
-		}
-
-		cfg, err := LoadConfig(overrides)
-		if err != nil {
-			t.Fatalf("LoadConfig() unexpected error: %v", err)
-		}
-
-		if cfg.SchemaTimeoutSeconds != 45 {
-			t.Errorf("LoadConfig() SchemaTimeoutSeconds = %v, want 45 (from CLI)", cfg.SchemaTimeoutSeconds)
-		}
-	})
-}
-
 func TestConfig_Validate_TLS(t *testing.T) {
 	// Generate test certificates once for all test cases
 	certPath, keyPath := testutil.GenerateTestTLSCertificate(t)
@@ -906,6 +842,88 @@ func TestLoadConfig_AuthHeaderName(t *testing.T) {
 
 		if !strings.Contains(err.Error(), "invalid auth header name") {
 			t.Errorf("LoadConfig() error = %v, want error containing 'invalid auth header name'", err)
+		}
+	})
+}
+
+// TestLoadConfig_SchemaSampleSize pins the end-to-end behaviour of the
+// --neo4j-schema-sample-size CLI flag. This flag previously parsed the value
+// but silently dropped it because the Args→CLIOverrides→LoadConfig chain was
+// broken: Args.SchemaSampleSize existed, but CLIOverrides had no matching
+// field and LoadConfig had no branch to apply it. This test ensures the fix
+// doesn't regress — if any of the three layers stops forwarding the value,
+// the CLI-override-precedence sub-test fails.
+func TestLoadConfig_SchemaSampleSize(t *testing.T) {
+	t.Run("default when neither env nor CLI set", func(t *testing.T) {
+		t.Setenv("NEO4J_TRANSPORT_MODE", "stdio")
+		t.Setenv("NEO4J_URI", "bolt://localhost:7687")
+		t.Setenv("NEO4J_USERNAME", "neo4j")
+		t.Setenv("NEO4J_PASSWORD", "password")
+
+		cfg, err := LoadConfig(nil)
+		if err != nil {
+			t.Fatalf("LoadConfig() unexpected error: %v", err)
+		}
+		if cfg.SchemaSampleSize != DefaultSchemaSampleSize {
+			t.Errorf("SchemaSampleSize = %d, want %d (default)", cfg.SchemaSampleSize, DefaultSchemaSampleSize)
+		}
+	})
+
+	t.Run("env var applied when CLI empty", func(t *testing.T) {
+		t.Setenv("NEO4J_TRANSPORT_MODE", "stdio")
+		t.Setenv("NEO4J_URI", "bolt://localhost:7687")
+		t.Setenv("NEO4J_USERNAME", "neo4j")
+		t.Setenv("NEO4J_PASSWORD", "password")
+		t.Setenv("NEO4J_SCHEMA_SAMPLE_SIZE", "250")
+
+		cfg, err := LoadConfig(nil)
+		if err != nil {
+			t.Fatalf("LoadConfig() unexpected error: %v", err)
+		}
+		if cfg.SchemaSampleSize != 250 {
+			t.Errorf("SchemaSampleSize = %d, want 250 (from env)", cfg.SchemaSampleSize)
+		}
+	})
+
+	t.Run("cli override takes precedence over env", func(t *testing.T) {
+		// This is the regression-guard sub-test. Before the fix, this would have
+		// silently produced SchemaSampleSize=250 because the CLI override was
+		// parsed into Args, but then dropped on the floor when constructing
+		// CLIOverrides. If the forwarding chain breaks again this assertion
+		// fails with "got 250, want 42" — a clear signal.
+		t.Setenv("NEO4J_TRANSPORT_MODE", "stdio")
+		t.Setenv("NEO4J_URI", "bolt://localhost:7687")
+		t.Setenv("NEO4J_USERNAME", "neo4j")
+		t.Setenv("NEO4J_PASSWORD", "password")
+		t.Setenv("NEO4J_SCHEMA_SAMPLE_SIZE", "250")
+
+		overrides := &CLIOverrides{SchemaSampleSize: "42"}
+		cfg, err := LoadConfig(overrides)
+		if err != nil {
+			t.Fatalf("LoadConfig() unexpected error: %v", err)
+		}
+		if cfg.SchemaSampleSize != 42 {
+			t.Errorf("SchemaSampleSize = %d, want 42 (from CLI override)", cfg.SchemaSampleSize)
+		}
+	})
+
+	t.Run("invalid cli override falls back to default", func(t *testing.T) {
+		// ParseInt32's contract: on parse error, fall back to the default rather
+		// than propagating the error. We rely on that behaviour here so a
+		// fat-fingered CLI value doesn't fail the server start; operators see a
+		// warning in logs and the process continues with the sensible default.
+		t.Setenv("NEO4J_TRANSPORT_MODE", "stdio")
+		t.Setenv("NEO4J_URI", "bolt://localhost:7687")
+		t.Setenv("NEO4J_USERNAME", "neo4j")
+		t.Setenv("NEO4J_PASSWORD", "password")
+
+		overrides := &CLIOverrides{SchemaSampleSize: "not-a-number"}
+		cfg, err := LoadConfig(overrides)
+		if err != nil {
+			t.Fatalf("LoadConfig() unexpected error: %v", err)
+		}
+		if cfg.SchemaSampleSize != DefaultSchemaSampleSize {
+			t.Errorf("SchemaSampleSize = %d, want %d (default after parse error)", cfg.SchemaSampleSize, DefaultSchemaSampleSize)
 		}
 	})
 }

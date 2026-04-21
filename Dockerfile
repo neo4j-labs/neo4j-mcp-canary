@@ -19,7 +19,7 @@ COPY . .
 
 # Build the binary
 RUN CGO_ENABLED=0 GOOS=linux go build -C cmd/neo4j-mcp -a -installsuffix cgo \
-    -o ../../neo4j-mcp -ldflags "-X 'main.Version=0.2.1'"
+    -o ../../neo4j-mcp -ldflags "-X 'main.Version=0.2.3'"
 
 # Runtime stage
 FROM scratch

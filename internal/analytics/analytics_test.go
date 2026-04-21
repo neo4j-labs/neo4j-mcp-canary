@@ -330,28 +330,87 @@ func TestEventCreation(t *testing.T) {
 		}
 	})
 
-	t.Run("NewSchemaTimeoutFallbackEvent", func(t *testing.T) {
-		event := analyticsService.NewSchemaTimeoutFallbackEvent(30.0, 1000)
-		if event.Event != "MCP-NEO4J-CANARY_SCHEMA_TIMEOUT_FALLBACK" {
-			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP-NEO4J-CANARY_SCHEMA_TIMEOUT_FALLBACK")
+	t.Run("NewSchemaRetrievalEvent with sampled outcome", func(t *testing.T) {
+		event := analyticsService.NewSchemaRetrievalEvent("sampled", 2500, 30.0, 1000, 12, 5, 8, 1, 0)
+		if event.Event != "MCP-NEO4J-CANARY_SCHEMA_RETRIEVAL" {
+			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP-NEO4J-CANARY_SCHEMA_RETRIEVAL")
 		}
 		props := assertBaseProperties(t, event.Properties)
+		if props["outcome"] != "sampled" {
+			t.Errorf("unexpected outcome: got %v, want %v", props["outcome"], "sampled")
+		}
+		if props["duration_ms"] != float64(2500) {
+			t.Errorf("unexpected duration_ms: got %v, want %v", props["duration_ms"], 2500)
+		}
 		if props["timeout_seconds"] != float64(30) {
 			t.Errorf("unexpected timeout_seconds: got %v, want %v", props["timeout_seconds"], 30)
 		}
 		if props["sample_size"] != float64(1000) {
 			t.Errorf("unexpected sample_size: got %v, want %v", props["sample_size"], 1000)
 		}
+		if props["node_label_count"] != float64(12) {
+			t.Errorf("unexpected node_label_count: got %v, want %v", props["node_label_count"], 12)
+		}
+		if props["rel_type_count"] != float64(5) {
+			t.Errorf("unexpected rel_type_count: got %v, want %v", props["rel_type_count"], 5)
+		}
+		if props["index_count"] != float64(8) {
+			t.Errorf("unexpected index_count: got %v, want %v", props["index_count"], 8)
+		}
+		if props["missing_node_label_count"] != float64(1) {
+			t.Errorf("unexpected missing_node_label_count: got %v, want %v", props["missing_node_label_count"], 1)
+		}
+		if props["missing_rel_type_count"] != float64(0) {
+			t.Errorf("unexpected missing_rel_type_count: got %v, want %v", props["missing_rel_type_count"], 0)
+		}
 	})
 
-	t.Run("NewSchemaTimeoutFallbackEvent with custom values", func(t *testing.T) {
-		event := analyticsService.NewSchemaTimeoutFallbackEvent(45.5, 500)
+	t.Run("NewSchemaRetrievalEvent with full_scan outcome", func(t *testing.T) {
+		// Full-scan path: sample_size is 0 (not used by the primary schema queries)
+		// and serialises to a numeric zero rather than being omitted — this lets
+		// the Mixpanel consumer group-by outcome without null-handling pitfalls.
+		event := analyticsService.NewSchemaRetrievalEvent("full_scan", 850, 30.0, 0, 3, 2, 4, 0, 0)
 		props := assertBaseProperties(t, event.Properties)
-		if props["timeout_seconds"] != 45.5 {
-			t.Errorf("unexpected timeout_seconds: got %v, want %v", props["timeout_seconds"], 45.5)
+		if props["outcome"] != "full_scan" {
+			t.Errorf("unexpected outcome: got %v, want %v", props["outcome"], "full_scan")
 		}
-		if props["sample_size"] != float64(500) {
-			t.Errorf("unexpected sample_size: got %v, want %v", props["sample_size"], 500)
+		if props["sample_size"] != float64(0) {
+			t.Errorf("unexpected sample_size: got %v, want %v", props["sample_size"], 0)
+		}
+		if props["duration_ms"] != float64(850) {
+			t.Errorf("unexpected duration_ms: got %v, want %v", props["duration_ms"], 850)
+		}
+	})
+
+	t.Run("NewSchemaRetrievalEvent clamps negative numeric inputs to zero", func(t *testing.T) {
+		// Defensive behaviour: a driver hiccup or an interface change could plausibly
+		// surface a negative count where none makes physical sense (you can't have
+		// -3 node labels). The constructor clamps rather than letting the nonsense
+		// leak into the Mixpanel distribution — a 0 in the data is a known "no signal"
+		// value, a -3 is a confusing outlier that poisons dashboards.
+		//
+		// timeoutSeconds is intentionally NOT clamped: a negative configured timeout
+		// is an operator misconfiguration we'd rather surface than silently correct.
+		event := analyticsService.NewSchemaRetrievalEvent("full_scan", -100, 30.0, -5, -1, -2, -3, -4, -6)
+		props := assertBaseProperties(t, event.Properties)
+		for _, field := range []string{
+			"duration_ms",
+			"sample_size",
+			"node_label_count",
+			"rel_type_count",
+			"index_count",
+			"missing_node_label_count",
+			"missing_rel_type_count",
+		} {
+			if props[field] != float64(0) {
+				t.Errorf("expected %s clamped to 0, got %v", field, props[field])
+			}
+		}
+		// timeoutSeconds should pass through unclamped (even though we passed a positive
+		// value here — this asserts the field still round-trips, which is the fallback
+		// check if a future refactor accidentally starts clamping it).
+		if props["timeout_seconds"] != float64(30) {
+			t.Errorf("expected timeout_seconds unclamped at 30, got %v", props["timeout_seconds"])
 		}
 	})
 

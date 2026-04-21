@@ -18,16 +18,58 @@ import (
 type TransportMode string
 
 const (
-	// DefaultSchemaSampleSize is the default number of nodes to sample when using the sampling-based schema fallback
+	// DefaultSchemaSampleSize is the default value forwarded to apoc.meta.schema's
+	// `sample` parameter, capping how many nodes per label APOC examines when
+	// inferring the schema.
 	DefaultSchemaSampleSize int32 = 1000
-	// DefaultSchemaTimeoutSeconds is the default timeout (in seconds) for the primary schema procedures.
-	// If the primary schema queries (db.schema.nodeTypeProperties / relTypeProperties) exceed this duration,
-	// the handler falls back to a Spark-connector-inspired sampling approach.
-	// A value of 0 disables the timeout (no fallback).
-	DefaultSchemaTimeoutSeconds int32 = 30
-	TransportModeStdio        TransportMode = "stdio"
-	TransportModeHTTP         TransportMode = "http"
-	DeprecatedVariableMessage string        = "Warning: deprecated environment variable \"%s\". Please use: \"%s\" instead\n"
+	// DefaultCypherMaxRows is the default per-call row cap applied by the streaming
+	// read-cypher and write-cypher execution paths. It exists to protect the MCP client
+	// from unbounded result sets — an agent that omits a LIMIT on a multi-million-row
+	// table would otherwise hang for minutes while the driver buffers and serialises
+	// the full payload. When the cap fires, the response includes a truncated=true flag
+	// and a hint telling the caller to add a LIMIT. A value of 0 disables the cap.
+	DefaultCypherMaxRows int32 = 1000
+	// DefaultCypherMaxBytes is the default per-call byte cap applied alongside
+	// DefaultCypherMaxRows. It complements the row cap: an agent asking for 1000
+	// wide nodes (for example full Company records with 19 properties each) can
+	// easily produce a response well over 1 MB, which then fails at the MCP
+	// transport layer with an opaque "tool result too large" error — wasting the
+	// work and giving the agent no structured signal. The byte cap causes the
+	// streaming loop to stop at a size the transport can carry and surfaces a
+	// truncation envelope with a hint that steers the agent toward a narrower
+	// projection (for example RETURN c.name, c.companyNumber) rather than a
+	// smaller LIMIT, because for wide nodes it's the per-row width that's the
+	// real problem, not the row count.
+	//
+	// 900_000 bytes (~900 KB) leaves headroom under the observed 1 MB transport
+	// ceiling. A value of 0 disables the cap.
+	DefaultCypherMaxBytes int32 = 900_000
+	// DefaultCypherTimeoutSeconds is the default context timeout (in seconds) for
+	// read-cypher and write-cypher execution. Chosen to match DefaultSchemaTimeoutSeconds
+	// so that a caller waiting on any single Cypher tool call sees consistent behaviour.
+	// A value of 0 disables the timeout.
+	DefaultCypherTimeoutSeconds int32 = 30
+	// DefaultCypherMaxEstimatedRows is the default threshold for the EXPLAIN-time
+	// estimate guard applied by read-cypher. Before executing a query, the handler
+	// reads the planner's EstimatedRows at the root of the EXPLAIN plan; if it
+	// exceeds this threshold, the query is refused with a hint telling the caller
+	// to add a LIMIT.
+	//
+	// This sits above the row cap and context timeout as a third layer of defence:
+	// the row cap reacts after rows start flowing, the timeout reacts after time
+	// passes, and this guard reacts before the query even starts running — based
+	// on what the planner already knows about the shape of the work.
+	//
+	// 1,000,000 is chosen as a clear "truly unbounded territory" line rather than
+	// a tight match to DefaultCypherMaxRows: the planner already folds LIMIT
+	// clauses into the root EstimatedRows, so a legitimate MATCH ... LIMIT 100
+	// query has a root estimate around 100 and passes cleanly. A bare MATCH on a
+	// multi-million-row label on the other hand estimates into the millions and is
+	// exactly the shape this guard is trying to catch. A value of 0 disables the guard.
+	DefaultCypherMaxEstimatedRows int32         = 1000000
+	TransportModeStdio            TransportMode = "stdio"
+	TransportModeHTTP             TransportMode = "http"
+	DeprecatedVariableMessage     string        = "Warning: deprecated environment variable \"%s\". Please use: \"%s\" instead\n"
 )
 
 // ValidTransportModes defines the allowed transport mode values
@@ -44,7 +86,10 @@ type Config struct {
 	LogLevel                                    string
 	LogFormat                                   string
 	SchemaSampleSize                            int32
-	SchemaTimeoutSeconds                        int32 // Timeout in seconds for primary schema procedures; 0 disables the timeout fallback
+	CypherMaxRows                               int32 // Per-call row cap applied by read-cypher and write-cypher; 0 disables the cap
+	CypherMaxBytes                              int32 // Per-call byte cap applied alongside CypherMaxRows; 0 disables the cap
+	CypherTimeoutSeconds                        int32 // Context timeout in seconds for read-cypher and write-cypher execution; 0 disables the timeout
+	CypherMaxEstimatedRows                      int32 // EXPLAIN-time estimate threshold above which read-cypher refuses the query; 0 disables the guard
 	TransportMode                               TransportMode // MCP Transport mode (e.g., "stdio", "http")
 	HTTPPort                                    string        // HTTP server port (default: "443" with TLS, "80" without TLS)
 	HTTPHost                                    string        // HTTP server host (default: "127.0.0.1")
@@ -120,7 +165,11 @@ type CLIOverrides struct {
 	Database                                    string
 	ReadOnly                                    string
 	Telemetry                                   string
-	SchemaTimeout                               string
+	SchemaSampleSize                            string
+	CypherMaxRows                               string
+	CypherMaxBytes                              string
+	CypherTimeout                               string
+	CypherMaxEstimatedRows                      string
 	TransportMode                               string
 	Port                                        string
 	Host                                        string
@@ -168,7 +217,10 @@ func LoadConfig(cliOverrides *CLIOverrides) (*Config, error) {
 		LogLevel:                       logLevel,
 		LogFormat:                      logFormat,
 		SchemaSampleSize:               ParseInt32(GetEnv("NEO4J_SCHEMA_SAMPLE_SIZE"), DefaultSchemaSampleSize),
-		SchemaTimeoutSeconds:           ParseInt32(GetEnv("NEO4J_SCHEMA_TIMEOUT"), DefaultSchemaTimeoutSeconds),
+		CypherMaxRows:                  ParseInt32(GetEnv("NEO4J_CYPHER_MAX_ROWS"), DefaultCypherMaxRows),
+		CypherMaxBytes:                 ParseInt32(GetEnv("NEO4J_CYPHER_MAX_BYTES"), DefaultCypherMaxBytes),
+		CypherTimeoutSeconds:           ParseInt32(GetEnv("NEO4J_CYPHER_TIMEOUT"), DefaultCypherTimeoutSeconds),
+		CypherMaxEstimatedRows:         ParseInt32(GetEnv("NEO4J_CYPHER_MAX_ESTIMATED_ROWS"), DefaultCypherMaxEstimatedRows),
 		TransportMode:                  GetTransportModeWithDefault("NEO4J_TRANSPORT_MODE", GetTransportModeWithDefault("NEO4J_MCP_TRANSPORT", TransportModeStdio)),
 		HTTPPort:                       GetEnv("NEO4J_MCP_HTTP_PORT"), // Default set after TLS determination
 		HTTPHost:                       GetEnvWithDefault("NEO4J_MCP_HTTP_HOST", "127.0.0.1"),
@@ -203,8 +255,24 @@ func LoadConfig(cliOverrides *CLIOverrides) (*Config, error) {
 		if cliOverrides.Telemetry != "" {
 			cfg.Telemetry = ParseBool(cliOverrides.Telemetry, true)
 		}
-		if cliOverrides.SchemaTimeout != "" {
-			cfg.SchemaTimeoutSeconds = ParseInt32(cliOverrides.SchemaTimeout, DefaultSchemaTimeoutSeconds)
+		// SchemaSampleSize handling was previously a dead flag — the Args struct
+		// carried the value, but main.go never threaded it into CLIOverrides and
+		// LoadConfig had no branch to apply it. Wiring it here makes
+		// --neo4j-schema-sample-size functional at last.
+		if cliOverrides.SchemaSampleSize != "" {
+			cfg.SchemaSampleSize = ParseInt32(cliOverrides.SchemaSampleSize, DefaultSchemaSampleSize)
+		}
+		if cliOverrides.CypherMaxRows != "" {
+			cfg.CypherMaxRows = ParseInt32(cliOverrides.CypherMaxRows, DefaultCypherMaxRows)
+		}
+		if cliOverrides.CypherMaxBytes != "" {
+			cfg.CypherMaxBytes = ParseInt32(cliOverrides.CypherMaxBytes, DefaultCypherMaxBytes)
+		}
+		if cliOverrides.CypherTimeout != "" {
+			cfg.CypherTimeoutSeconds = ParseInt32(cliOverrides.CypherTimeout, DefaultCypherTimeoutSeconds)
+		}
+		if cliOverrides.CypherMaxEstimatedRows != "" {
+			cfg.CypherMaxEstimatedRows = ParseInt32(cliOverrides.CypherMaxEstimatedRows, DefaultCypherMaxEstimatedRows)
 		}
 		if cliOverrides.TransportMode != "" {
 			cfg.TransportMode = TransportMode(cliOverrides.TransportMode)

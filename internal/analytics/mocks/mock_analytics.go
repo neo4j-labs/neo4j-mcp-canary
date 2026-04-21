@@ -303,40 +303,78 @@ func (c *MockServiceNewGDSProjDropEventCall) DoAndReturn(f func() analytics.Trac
 	return c
 }
 
-// NewSchemaTimeoutFallbackEvent mocks base method.
-func (m *MockService) NewSchemaTimeoutFallbackEvent(timeoutSeconds float64, sampleSize int) analytics.TrackEvent {
+// NewCypherEstimateEvent mocks base method.
+func (m *MockService) NewCypherEstimateEvent(outcome string, estimatedRows int64, actualRows int, truncated bool, estimateThreshold, rowCap int) analytics.TrackEvent {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "NewSchemaTimeoutFallbackEvent", timeoutSeconds, sampleSize)
+	ret := m.ctrl.Call(m, "NewCypherEstimateEvent", outcome, estimatedRows, actualRows, truncated, estimateThreshold, rowCap)
 	ret0, _ := ret[0].(analytics.TrackEvent)
 	return ret0
 }
 
-// NewSchemaTimeoutFallbackEvent indicates an expected call of NewSchemaTimeoutFallbackEvent.
-func (mr *MockServiceMockRecorder) NewSchemaTimeoutFallbackEvent(timeoutSeconds, sampleSize any) *MockServiceNewSchemaTimeoutFallbackEventCall {
+// NewCypherEstimateEvent indicates an expected call of NewCypherEstimateEvent.
+func (mr *MockServiceMockRecorder) NewCypherEstimateEvent(outcome, estimatedRows, actualRows, truncated, estimateThreshold, rowCap any) *MockServiceNewCypherEstimateEventCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewSchemaTimeoutFallbackEvent", reflect.TypeOf((*MockService)(nil).NewSchemaTimeoutFallbackEvent), timeoutSeconds, sampleSize)
-	return &MockServiceNewSchemaTimeoutFallbackEventCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewCypherEstimateEvent", reflect.TypeOf((*MockService)(nil).NewCypherEstimateEvent), outcome, estimatedRows, actualRows, truncated, estimateThreshold, rowCap)
+	return &MockServiceNewCypherEstimateEventCall{Call: call}
 }
 
-// MockServiceNewSchemaTimeoutFallbackEventCall wrap *gomock.Call
-type MockServiceNewSchemaTimeoutFallbackEventCall struct {
+// MockServiceNewCypherEstimateEventCall wrap *gomock.Call
+type MockServiceNewCypherEstimateEventCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockServiceNewSchemaTimeoutFallbackEventCall) Return(arg0 analytics.TrackEvent) *MockServiceNewSchemaTimeoutFallbackEventCall {
+func (c *MockServiceNewCypherEstimateEventCall) Return(arg0 analytics.TrackEvent) *MockServiceNewCypherEstimateEventCall {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockServiceNewSchemaTimeoutFallbackEventCall) Do(f func(float64, int) analytics.TrackEvent) *MockServiceNewSchemaTimeoutFallbackEventCall {
+func (c *MockServiceNewCypherEstimateEventCall) Do(f func(string, int64, int, bool, int, int) analytics.TrackEvent) *MockServiceNewCypherEstimateEventCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockServiceNewSchemaTimeoutFallbackEventCall) DoAndReturn(f func(float64, int) analytics.TrackEvent) *MockServiceNewSchemaTimeoutFallbackEventCall {
+func (c *MockServiceNewCypherEstimateEventCall) DoAndReturn(f func(string, int64, int, bool, int, int) analytics.TrackEvent) *MockServiceNewCypherEstimateEventCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// NewSchemaRetrievalEvent mocks base method.
+func (m *MockService) NewSchemaRetrievalEvent(outcome string, durationMs int64, timeoutSeconds float64, sampleSize, nodeLabelCount, relTypeCount, indexCount, missingNodeLabelCount, missingRelTypeCount int) analytics.TrackEvent {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NewSchemaRetrievalEvent", outcome, durationMs, timeoutSeconds, sampleSize, nodeLabelCount, relTypeCount, indexCount, missingNodeLabelCount, missingRelTypeCount)
+	ret0, _ := ret[0].(analytics.TrackEvent)
+	return ret0
+}
+
+// NewSchemaRetrievalEvent indicates an expected call of NewSchemaRetrievalEvent.
+func (mr *MockServiceMockRecorder) NewSchemaRetrievalEvent(outcome, durationMs, timeoutSeconds, sampleSize, nodeLabelCount, relTypeCount, indexCount, missingNodeLabelCount, missingRelTypeCount any) *MockServiceNewSchemaRetrievalEventCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewSchemaRetrievalEvent", reflect.TypeOf((*MockService)(nil).NewSchemaRetrievalEvent), outcome, durationMs, timeoutSeconds, sampleSize, nodeLabelCount, relTypeCount, indexCount, missingNodeLabelCount, missingRelTypeCount)
+	return &MockServiceNewSchemaRetrievalEventCall{Call: call}
+}
+
+// MockServiceNewSchemaRetrievalEventCall wrap *gomock.Call
+type MockServiceNewSchemaRetrievalEventCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockServiceNewSchemaRetrievalEventCall) Return(arg0 analytics.TrackEvent) *MockServiceNewSchemaRetrievalEventCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockServiceNewSchemaRetrievalEventCall) Do(f func(string, int64, float64, int, int, int, int, int, int) analytics.TrackEvent) *MockServiceNewSchemaRetrievalEventCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockServiceNewSchemaRetrievalEventCall) DoAndReturn(f func(string, int64, float64, int, int, int, int, int, int) analytics.TrackEvent) *MockServiceNewSchemaRetrievalEventCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -417,40 +455,40 @@ func (c *MockServiceNewToolEventCall) DoAndReturn(f func(string, bool, *analytic
 	return c
 }
 
-// NewUnauthenticatedJsonRpcEvent mocks base method.
-func (m *MockService) NewUnauthenticatedJsonRpcEvent(jsonRpcRequest string) analytics.TrackEvent {
+// NewUnauthenticatedJSONRPCEvent mocks base method.
+func (m *MockService) NewUnauthenticatedJSONRPCEvent(jsonRPCRequest string) analytics.TrackEvent {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "NewUnauthenticatedJsonRpcEvent", jsonRpcRequest)
+	ret := m.ctrl.Call(m, "NewUnauthenticatedJSONRPCEvent", jsonRPCRequest)
 	ret0, _ := ret[0].(analytics.TrackEvent)
 	return ret0
 }
 
-// NewUnauthenticatedJsonRpcEvent indicates an expected call of NewUnauthenticatedJsonRpcEvent.
-func (mr *MockServiceMockRecorder) NewUnauthenticatedJsonRpcEvent(jsonRpcRequest any) *MockServiceNewUnauthenticatedJsonRpcEventCall {
+// NewUnauthenticatedJSONRPCEvent indicates an expected call of NewUnauthenticatedJSONRPCEvent.
+func (mr *MockServiceMockRecorder) NewUnauthenticatedJSONRPCEvent(jsonRPCRequest any) *MockServiceNewUnauthenticatedJSONRPCEventCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewUnauthenticatedJsonRpcEvent", reflect.TypeOf((*MockService)(nil).NewUnauthenticatedJsonRpcEvent), jsonRpcRequest)
-	return &MockServiceNewUnauthenticatedJsonRpcEventCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewUnauthenticatedJSONRPCEvent", reflect.TypeOf((*MockService)(nil).NewUnauthenticatedJSONRPCEvent), jsonRPCRequest)
+	return &MockServiceNewUnauthenticatedJSONRPCEventCall{Call: call}
 }
 
-// MockServiceNewUnauthenticatedJsonRpcEventCall wrap *gomock.Call
-type MockServiceNewUnauthenticatedJsonRpcEventCall struct {
+// MockServiceNewUnauthenticatedJSONRPCEventCall wrap *gomock.Call
+type MockServiceNewUnauthenticatedJSONRPCEventCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockServiceNewUnauthenticatedJsonRpcEventCall) Return(arg0 analytics.TrackEvent) *MockServiceNewUnauthenticatedJsonRpcEventCall {
+func (c *MockServiceNewUnauthenticatedJSONRPCEventCall) Return(arg0 analytics.TrackEvent) *MockServiceNewUnauthenticatedJSONRPCEventCall {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockServiceNewUnauthenticatedJsonRpcEventCall) Do(f func(string) analytics.TrackEvent) *MockServiceNewUnauthenticatedJsonRpcEventCall {
+func (c *MockServiceNewUnauthenticatedJSONRPCEventCall) Do(f func(string) analytics.TrackEvent) *MockServiceNewUnauthenticatedJSONRPCEventCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockServiceNewUnauthenticatedJsonRpcEventCall) DoAndReturn(f func(string) analytics.TrackEvent) *MockServiceNewUnauthenticatedJsonRpcEventCall {
+func (c *MockServiceNewUnauthenticatedJSONRPCEventCall) DoAndReturn(f func(string) analytics.TrackEvent) *MockServiceNewUnauthenticatedJSONRPCEventCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

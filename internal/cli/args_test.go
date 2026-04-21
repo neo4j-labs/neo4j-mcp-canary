@@ -12,9 +12,9 @@ import (
 
 const (
 	testVersion     = "1.0.0"
-	testProgramName = "neo4j-mcp"
-	testHelpText    = "neo4j-mcp - Neo4j Model Context Protocol Server"
-	testVersionText = "neo4j-mcp version: 1.0.0"
+	testProgramName = "neo4j-mcp-canary"
+	testHelpText    = "neo4j-mcp-canary - Neo4j Model Context Protocol Canary Server"
+	testVersionText = "neo4j-mcp-canary version: 1.0.0"
 )
 
 // captureOutput temporarily redirects stdout and stderr to capture output.
@@ -189,6 +189,72 @@ func TestHandleArgs(t *testing.T) {
 			version:          testVersion,
 			expectedExitCode: 1,
 			expectedStderr:   "--neo4j-schema-sample-size requires a value",
+		},
+		// Cypher operational controls — each flag gets a valid-value case (to
+		// confirm HandleArgs accepts the flag without exiting) and a missing-value
+		// case (to confirm the standard "requires a value" error fires).
+		{
+			name:             "cypher max rows flag with valid value",
+			args:             []string{testProgramName, "--neo4j-cypher-max-rows", "500"},
+			version:          testVersion,
+			expectedExitCode: -1,
+		},
+		{
+			name:             "cypher max rows flag missing value",
+			args:             []string{testProgramName, "--neo4j-cypher-max-rows"},
+			version:          testVersion,
+			expectedExitCode: 1,
+			expectedStderr:   "--neo4j-cypher-max-rows requires a value",
+		},
+		{
+			name:             "cypher max bytes flag with valid value",
+			args:             []string{testProgramName, "--neo4j-cypher-max-bytes", "500000"},
+			version:          testVersion,
+			expectedExitCode: -1,
+		},
+		{
+			name:             "cypher max bytes flag missing value",
+			args:             []string{testProgramName, "--neo4j-cypher-max-bytes"},
+			version:          testVersion,
+			expectedExitCode: 1,
+			expectedStderr:   "--neo4j-cypher-max-bytes requires a value",
+		},
+		{
+			name:             "cypher timeout flag with valid value",
+			args:             []string{testProgramName, "--neo4j-cypher-timeout", "60"},
+			version:          testVersion,
+			expectedExitCode: -1,
+		},
+		{
+			name:             "cypher timeout flag missing value",
+			args:             []string{testProgramName, "--neo4j-cypher-timeout"},
+			version:          testVersion,
+			expectedExitCode: 1,
+			expectedStderr:   "--neo4j-cypher-timeout requires a value",
+		},
+		{
+			name:             "cypher max estimated rows flag with valid value",
+			args:             []string{testProgramName, "--neo4j-cypher-max-estimated-rows", "1000000"},
+			version:          testVersion,
+			expectedExitCode: -1,
+		},
+		{
+			name:             "cypher max estimated rows flag missing value",
+			args:             []string{testProgramName, "--neo4j-cypher-max-estimated-rows"},
+			version:          testVersion,
+			expectedExitCode: 1,
+			expectedStderr:   "--neo4j-cypher-max-estimated-rows requires a value",
+		},
+		// Adjacency check: a cypher flag followed by another flag (rather than a
+		// value) must surface the more descriptive error form. Pinning one case
+		// of this is sufficient — the underlying detection logic is shared across
+		// all flags in argsSlice.
+		{
+			name:             "cypher max bytes missing value - followed by another flag",
+			args:             []string{testProgramName, "--neo4j-cypher-max-bytes", "--neo4j-uri", "bolt://localhost:7687"},
+			version:          testVersion,
+			expectedExitCode: 1,
+			expectedStderr:   "--neo4j-cypher-max-bytes requires a value (got flag --neo4j-uri instead)",
 		},
 		{
 			name:             "transport mode flag valid value",

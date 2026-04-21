@@ -29,8 +29,7 @@ func TestReadCypher(t *testing.T) {
 			"params": map[string]any{"name": "Alice"},
 		})
 
-		var records []map[string]any
-		tc.ParseJSONResponse(res, &records)
+		records := tc.ParseCypherRecords(res)
 
 		if len(records) != 1 {
 			t.Fatalf("expected 1 record, got %d", len(records))

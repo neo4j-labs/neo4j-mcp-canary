@@ -14,10 +14,10 @@ import (
 // osExit is a variable that can be mocked in tests
 var osExit = os.Exit
 
-const helpText = `neo4j-mcp - Neo4j Model Context Protocol Server
+const helpText = `neo4j-mcp-canary - Neo4j Model Context Protocol Canary Server
 
 Usage:
-  neo4j-mcp [OPTIONS]
+  neo4j-mcp-canary [OPTIONS]
 
 Options:
   -h, --help                          Show this help message
@@ -28,8 +28,11 @@ Options:
   --neo4j-database <DATABASE>         Database name (overrides environment variable NEO4J_DATABASE)
   --neo4j-read-only <BOOLEAN>         Enable read-only mode: true or false (overrides environment variable NEO4J_READ_ONLY)
   --neo4j-telemetry <BOOLEAN>         Enable telemetry: true or false (overrides environment variable NEO4J_TELEMETRY)
-  --neo4j-schema-sample-size <INT>    Number of records to sample for fallback schema inference (overrides environment variable NEO4J_SCHEMA_SAMPLE_SIZE)
-  --neo4j-schema-timeout <INT>        Timeout in seconds for primary schema queries; 0 disables fallback (overrides environment variable NEO4J_SCHEMA_TIMEOUT)
+  --neo4j-schema-sample-size <INT>    Number of nodes per label APOC samples when inferring schema (overrides environment variable NEO4J_SCHEMA_SAMPLE_SIZE)
+  --neo4j-cypher-max-rows <INT>       Per-call row cap for read-cypher and write-cypher; 0 disables (overrides environment variable NEO4J_CYPHER_MAX_ROWS)
+  --neo4j-cypher-max-bytes <INT>      Per-call byte cap for read-cypher and write-cypher; 0 disables (overrides environment variable NEO4J_CYPHER_MAX_BYTES)
+  --neo4j-cypher-timeout <INT>        Context timeout in seconds for read-cypher and write-cypher execution; 0 disables (overrides environment variable NEO4J_CYPHER_TIMEOUT)
+  --neo4j-cypher-max-estimated-rows <INT>  EXPLAIN-time estimate threshold above which read-cypher refuses the query; 0 disables (overrides environment variable NEO4J_CYPHER_MAX_ESTIMATED_ROWS)
   --neo4j-transport-mode <MODE>       MCP Transport mode (e.g., 'stdio', 'http') (overrides environment variable NEO4J_TRANSPORT_MODE & NEO4J_MCP_TRANSPORT(deprecated))
   --neo4j-http-port <PORT>            HTTP server port (overrides environment variable NEO4J_MCP_HTTP_PORT)
   --neo4j-http-host <HOST>            HTTP server host (overrides environment variable NEO4J_MCP_HTTP_HOST)
@@ -52,8 +55,11 @@ Optional Environment Variables:
   NEO4J_DATABASE  Database name (default: neo4j)
   NEO4J_TELEMETRY Enable/disable telemetry (default: true)
   NEO4J_READ_ONLY Enable read-only mode (default: false)
-  NEO4J_SCHEMA_SAMPLE_SIZE Number of records to sample for fallback schema inference (default: 1000)
-  NEO4J_SCHEMA_TIMEOUT Timeout in seconds for primary schema queries; 0 disables fallback (default: 30)
+  NEO4J_SCHEMA_SAMPLE_SIZE Number of nodes per label APOC samples when inferring schema (default: 1000)
+  NEO4J_CYPHER_MAX_ROWS Per-call row cap for read-cypher and write-cypher (default: 1000, 0 disables)
+  NEO4J_CYPHER_MAX_BYTES Per-call byte cap for read-cypher and write-cypher (default: 900000, 0 disables)
+  NEO4J_CYPHER_TIMEOUT Context timeout in seconds for read-cypher and write-cypher (default: 30, 0 disables)
+  NEO4J_CYPHER_MAX_ESTIMATED_ROWS EXPLAIN-time estimate threshold for read-cypher refusal (default: 1000000, 0 disables)
   NEO4J_TRANSPORT_MODE MCP Transport mode (e.g., 'stdio', 'http') (default: stdio)
   NEO4J_MCP_TRANSPORT MCP Transport mode (e.g., 'stdio', 'http') (default: stdio)
   NEO4J_MCP_HTTP_PORT HTTP server port (default: 443 with TLS, 80 without TLS)
@@ -70,12 +76,12 @@ Optional Environment Variables:
 
   Examples:
   # Using environment variables
-  NEO4J_URI=bolt://localhost:7687 NEO4J_USERNAME=neo4j NEO4J_PASSWORD=password neo4j-mcp
+  NEO4J_URI=bolt://localhost:7687 NEO4J_USERNAME=neo4j NEO4J_PASSWORD=password neo4j-mcp-canary
 
   # Using CLI flags (takes precedence over environment variables)
-  neo4j-mcp --neo4j-uri bolt://localhost:7687 --neo4j-username neo4j --neo4j-password password
+  neo4j-mcp-canary --neo4j-uri bolt://localhost:7687 --neo4j-username neo4j --neo4j-password password
 
-For more information, visit: https://github.com/neo4j/mcp
+For more information, visit: https://github.com/neo4j-labs/neo4j-mcp-canary
 `
 
 // Args holds configuration values parsed from command-line flags
@@ -87,7 +93,10 @@ type Args struct {
 	ReadOnly                                        string
 	Telemetry                                       string
 	SchemaSampleSize                                string
-	SchemaTimeout                                   string
+	CypherMaxRows                                   string
+	CypherMaxBytes                                  string
+	CypherTimeout                                   string
+	CypherMaxEstimatedRows                          string
 	TransportMode                                   string
 	HTTPPort                                        string
 	HTTPHost                                        string
@@ -112,7 +121,10 @@ var argsSlice = []string{
 	"--neo4j-read-only",
 	"--neo4j-telemetry",
 	"--neo4j-schema-sample-size",
-	"--neo4j-schema-timeout",
+	"--neo4j-cypher-max-rows",
+	"--neo4j-cypher-max-bytes",
+	"--neo4j-cypher-timeout",
+	"--neo4j-cypher-max-estimated-rows",
 	"--neo4j-transport-mode",
 	"--neo4j-http-port",
 	"--neo4j-http-host",
@@ -136,8 +148,17 @@ func ParseConfigFlags() *Args {
 	neo4jDatabase := flag.String("neo4j-database", "", "Neo4j database name (overrides NEO4J_DATABASE env var)")
 	neo4jReadOnly := flag.String("neo4j-read-only", "", "Enable read-only mode: true or false (overrides NEO4J_READ_ONLY env var)")
 	neo4jTelemetry := flag.String("neo4j-telemetry", "", "Enable telemetry: true or false (overrides NEO4J_TELEMETRY env var)")
-	neo4jSchemaSampleSize := flag.String("neo4j-schema-sample-size", "", "Number of records to sample for fallback schema inference (overrides NEO4J_SCHEMA_SAMPLE_SIZE env var)")
-	neo4jSchemaTimeout := flag.String("neo4j-schema-timeout", "", "Timeout in seconds for primary schema queries; 0 disables fallback (overrides NEO4J_SCHEMA_TIMEOUT env var)")
+	neo4jSchemaSampleSize := flag.String("neo4j-schema-sample-size", "", "Number of nodes per label APOC samples when inferring schema (overrides NEO4J_SCHEMA_SAMPLE_SIZE env var)")
+	// Cypher operational controls — one string flag per knob. They're parsed as
+	// strings here (not int) because config.LoadConfig already handles the
+	// string→int32 parsing via ParseInt32 for CLI and env values alike, and
+	// keeping the flag type consistent with the other CLI flags here makes the
+	// CLIOverrides struct uniformly typed. 0 disables each cap individually
+	// (see the constants in internal/config/config.go).
+	neo4jCypherMaxRows := flag.String("neo4j-cypher-max-rows", "", "Per-call row cap for read-cypher and write-cypher (overrides NEO4J_CYPHER_MAX_ROWS env var)")
+	neo4jCypherMaxBytes := flag.String("neo4j-cypher-max-bytes", "", "Per-call byte cap for read-cypher and write-cypher (overrides NEO4J_CYPHER_MAX_BYTES env var)")
+	neo4jCypherTimeout := flag.String("neo4j-cypher-timeout", "", "Context timeout in seconds for read-cypher and write-cypher (overrides NEO4J_CYPHER_TIMEOUT env var)")
+	neo4jCypherMaxEstimatedRows := flag.String("neo4j-cypher-max-estimated-rows", "", "EXPLAIN-time estimate threshold for read-cypher refusal (overrides NEO4J_CYPHER_MAX_ESTIMATED_ROWS env var)")
 	neo4jTransportMode := flag.String("neo4j-transport-mode", "", "MCP Transport mode (e.g., 'stdio', 'http') (overrides NEO4J_TRANSPORT_MODE env var)")
 	neo4jHTTPPort := flag.String("neo4j-http-port", "", "HTTP server port (overrides NEO4J_MCP_HTTP_PORT env var)")
 	neo4jHTTPHost := flag.String("neo4j-http-host", "", "HTTP server host (overrides NEO4J_MCP_HTTP_HOST env var)")
@@ -161,7 +182,10 @@ func ParseConfigFlags() *Args {
 		ReadOnly:                           *neo4jReadOnly,
 		Telemetry:                          *neo4jTelemetry,
 		SchemaSampleSize:                   *neo4jSchemaSampleSize,
-		SchemaTimeout:                      *neo4jSchemaTimeout,
+		CypherMaxRows:                      *neo4jCypherMaxRows,
+		CypherMaxBytes:                     *neo4jCypherMaxBytes,
+		CypherTimeout:                      *neo4jCypherTimeout,
+		CypherMaxEstimatedRows:             *neo4jCypherMaxEstimatedRows,
 		TransportMode:                      *neo4jTransportMode,
 		HTTPPort:                           *neo4jHTTPPort,
 		HTTPHost:                           *neo4jHTTPHost,
@@ -244,7 +268,7 @@ func HandleArgs(version string) {
 	}
 
 	if flags["version"] {
-		fmt.Printf("neo4j-mcp version: %s\n", version)
+		fmt.Printf("neo4j-mcp-canary version: %s\n", version)
 		osExit(0)
 	}
 }

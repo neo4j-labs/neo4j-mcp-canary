@@ -119,7 +119,7 @@ func authMiddleware(headerName string, unauthenticatedMethods []string, as analy
 						}
 						if ok {
 							slog.Info("Unauthenticated method", "method", method)
-							as.EmitEvent(as.NewUnauthenticatedJsonRpcEvent(method))
+							as.EmitEvent(as.NewUnauthenticatedJSONRPCEvent(method))
 							next.ServeHTTP(w, r)
 							return
 						}

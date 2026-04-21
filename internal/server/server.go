@@ -173,20 +173,6 @@ func (s *Neo4jMCPServer) verifyRequirements(ctx context.Context) error {
 	return nil
 }
 
-// toInt64Value converts a numeric value to int64, handling the common Neo4j driver types.
-func toInt64Value(raw any) (int64, bool) {
-	switch v := raw.(type) {
-	case int64:
-		return v, true
-	case int:
-		return int64(v), true
-	case float64:
-		return int64(v), true
-	default:
-		return 0, false
-	}
-}
-
 // emitServerStartupEvent emits the server startup event immediately with available info (no DB query)
 func (s *Neo4jMCPServer) emitServerStartupEvent() {
 	s.anService.EmitEvent(s.anService.NewStartupEvent(s.config.TransportMode, s.config.HTTPTLSEnabled, s.version))
