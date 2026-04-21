@@ -151,9 +151,12 @@ func (s *Neo4jService) GetQueryType(ctx context.Context, cypher string, params m
 	//     operation), so routing it to write-cypher is semantically correct under the
 	//     read/write split.
 	//
-	//   - EXPLAIN: wrapping would double-wrap into "EXPLAIN EXPLAIN <query>". EXPLAIN
-	//     by definition never executes (no mutation possible) so classifying as
-	//     ReadOnly without re-wrapping is both safe and cheaper.
+	//   - EXPLAIN: classifies cleanly as read-only at the protocol level, so the
+	//     write-cypher redirect that PROFILE gets would be wrong. But EXPLAIN on the
+	//     execution path produces zero records (the plan lives on ResultSummary,
+	//     not in the row stream), so letting it through would return an empty row
+	//     envelope to the caller. Return ErrExplainUnsupported so the read-cypher
+	//     handler can produce a targeted "remove the EXPLAIN prefix" message.
 	//
 	// Other leading verbs (CREATE, SET, etc.) are still classified via the EXPLAIN
 	// wrap below, because the planner is the authoritative source of truth for
@@ -166,7 +169,7 @@ func (s *Neo4jService) GetQueryType(ctx context.Context, cypher string, params m
 	case "PROFILE":
 		return neo4j.QueryTypeWriteOnly, nil
 	case "EXPLAIN":
-		return neo4j.QueryTypeReadOnly, nil
+		return neo4j.QueryTypeUnknown, ErrExplainUnsupported
 	}
 
 	explainedQuery := strings.Join([]string{"EXPLAIN", cypher}, " ")

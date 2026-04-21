@@ -7,9 +7,30 @@ package database
 
 import (
 	"context"
+	"errors"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
+
+// ErrExplainUnsupported is the sentinel returned by GetQueryType when the caller
+// submits an EXPLAIN-prefixed query. EXPLAIN classifies cleanly as read-only at
+// the protocol level and would therefore pass the read-cypher policy check, but
+// on the execution path it produces zero records (the plan lives on
+// ResultSummary rather than in the row stream). The MCP tool response would be
+// an empty row envelope with no indication that a plan was generated, which is
+// the worst of both worlds: the caller neither sees the plan nor understands
+// why the rows are missing.
+//
+// Returning this sentinel lets the read-cypher handler intercept EXPLAIN early
+// and produce a specific remediation message — "remove the EXPLAIN prefix" —
+// rather than the generic "use write-cypher" redirect it uses for true write
+// operations. write-cypher would exhibit the same empty-envelope behaviour for
+// EXPLAIN, so redirecting there would be actively misleading.
+//
+// The sentinel is exported so handlers and tests can match on it with
+// errors.Is. Callers outside the read-cypher path can safely ignore it — it is
+// only produced by GetQueryType.
+var ErrExplainUnsupported = errors.New("EXPLAIN queries are not supported by read-cypher")
 
 // Truncation reason values for QueryResult.TruncationReason.
 const (

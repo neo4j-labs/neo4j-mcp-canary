@@ -1049,4 +1049,183 @@ func TestReadCypherHandler(t *testing.T) {
 			t.Errorf("wrapped DeadlineExceeded not classified; check errors.Is unwrap path: %s", text.Text)
 		}
 	})
+
+	// EXPLAIN refusal: the service classifies EXPLAIN queries by returning the
+	// database.ErrExplainUnsupported sentinel from GetQueryType rather than a
+	// QueryType verdict. The handler must catch that sentinel with errors.Is
+	// and return the targeted "remove the EXPLAIN prefix" message, not the
+	// generic write-cypher redirect. We pin three substrings so the message
+	// can't silently drift into something less actionable:
+	//
+	//   - "Remove the EXPLAIN prefix" is the concrete remediation
+	//   - "NEO4J_CYPHER_MAX_ESTIMATED_ROWS" and "execution timeout" together
+	//     signal the safety rails that replace EXPLAIN's common use case
+	//     (runaway-query guarding)
+	//   - "write-cypher with PROFILE" gives callers the escape hatch for
+	//     callers who actually want a plan (with runtime stats).
+	//
+	// We also regression-guard against the pre-fix behaviour (empty rows) by
+	// setting no ExecuteReadQueryStreaming expectation — if the handler reaches
+	// the streaming path for EXPLAIN, gomock fails the test.
+	t.Run("EXPLAIN rejected with targeted remediation message", func(t *testing.T) {
+		mockDB := db.NewMockService(ctrl)
+		mockDB.EXPECT().
+			GetQueryType(gomock.Any(), "EXPLAIN MATCH (n) RETURN n", gomock.Nil()).
+			Return(neo4j.QueryTypeUnknown, database.ErrExplainUnsupported)
+
+		deps := &tools.ToolDependencies{
+			DBService:        mockDB,
+			AnalyticsService: analyticsService,
+			CypherMaxRows:    1000,
+		}
+
+		handler := cypher.ReadCypherHandler(deps)
+		request := mcp.CallToolRequest{
+			Params: mcp.CallToolParams{
+				Arguments: map[string]any{"query": "EXPLAIN MATCH (n) RETURN n"},
+			},
+		}
+
+		result, err := handler(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result == nil || !result.IsError {
+			t.Fatalf("expected error result for EXPLAIN, got: %+v", result)
+		}
+		text, ok := result.Content[0].(mcp.TextContent)
+		if !ok {
+			t.Fatalf("expected TextContent, got %T", result.Content[0])
+		}
+		if !strings.Contains(text.Text, "Remove the EXPLAIN prefix") {
+			t.Errorf("expected 'Remove the EXPLAIN prefix' remediation, got: %s", text.Text)
+		}
+		if !strings.Contains(text.Text, "NEO4J_CYPHER_MAX_ESTIMATED_ROWS") {
+			t.Errorf("expected NEO4J_CYPHER_MAX_ESTIMATED_ROWS safety-rail mention, got: %s", text.Text)
+		}
+		if !strings.Contains(text.Text, "write-cypher with PROFILE") {
+			t.Errorf("expected write-cypher+PROFILE escape hatch in message, got: %s", text.Text)
+		}
+		// Regression guard against the generic policy-refusal message — if the
+		// handler falls back to readCypherWriteRedirectMessage the caller gets
+		// told to "use write-cypher" for EXPLAIN, which produces the same empty
+		// envelope there. The targeted message must own this path.
+		if strings.Contains(text.Text, "can only run read-only Cypher statements") {
+			t.Errorf("generic policy message leaked for EXPLAIN; should use targeted message: %s", text.Text)
+		}
+	})
+
+	// AccessMode unwrapped: the driver's read-only session guard catches write
+	// clauses (SET/REMOVE after a MATCH) that the leading-verb classifier in
+	// GetQueryType doesn't see, producing a Neo.ClientError.Statement.AccessMode
+	// error from ExecuteReadQueryStreaming. Before the fix the caller saw the
+	// raw "Neo4jError: Neo.ClientError.Statement.AccessMode (Writing in read
+	// access mode not allowed...)" string, which is jargon that doesn't point
+	// at the remediation. We now map it to the same readCypherWriteRedirectMessage
+	// the queryType-rejection path uses, so both refusal paths are
+	// UX-consistent.
+	t.Run("AccessMode error maps to write-cypher redirect", func(t *testing.T) {
+		mockDB := db.NewMockService(ctrl)
+		mockDB.EXPECT().
+			GetQueryType(gomock.Any(), "MATCH (n) WHERE false SET n.x = 1 RETURN n", gomock.Nil()).
+			Return(neo4j.QueryTypeReadOnly, nil)
+		accessErr := &neo4j.Neo4jError{
+			Code: "Neo.ClientError.Statement.AccessMode",
+			Msg:  "Writing in read access mode not allowed. Attempted write to neo4j",
+		}
+		mockDB.EXPECT().
+			ExecuteReadQueryStreaming(gomock.Any(), "MATCH (n) WHERE false SET n.x = 1 RETURN n", gomock.Nil(), 1000, 0).
+			Return(nil, accessErr)
+		// Crucial: no QueryResultToJSON expectation. If the handler proceeds
+		// past the AccessMode interception gomock surfaces the unexpected call.
+
+		deps := &tools.ToolDependencies{
+			DBService:        mockDB,
+			AnalyticsService: analyticsService,
+			CypherMaxRows:    1000,
+		}
+
+		handler := cypher.ReadCypherHandler(deps)
+		request := mcp.CallToolRequest{
+			Params: mcp.CallToolParams{
+				Arguments: map[string]any{"query": "MATCH (n) WHERE false SET n.x = 1 RETURN n"},
+			},
+		}
+
+		result, err := handler(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result == nil || !result.IsError {
+			t.Fatalf("expected error result for AccessMode, got: %+v", result)
+		}
+		text, ok := result.Content[0].(mcp.TextContent)
+		if !ok {
+			t.Fatalf("expected TextContent, got %T", result.Content[0])
+		}
+		// Positive: the response carries the friendly policy message.
+		if !strings.Contains(text.Text, "use write-cypher instead") {
+			t.Errorf("expected 'use write-cypher instead' in AccessMode response, got: %s", text.Text)
+		}
+		// Regression guards: the raw driver jargon must not leak through.
+		// "Neo4jError" and "Writing in read access mode" are the two tokens a
+		// caller would fixate on in the previous passthrough behaviour; if
+		// either reappears the interception is broken.
+		if strings.Contains(text.Text, "Neo4jError") {
+			t.Errorf("raw Neo4jError leaked through AccessMode interception: %s", text.Text)
+		}
+		if strings.Contains(text.Text, "Writing in read access mode") {
+			t.Errorf("raw driver message leaked through AccessMode interception: %s", text.Text)
+		}
+	})
+
+	// AccessMode wrapped: executeStreaming in service.go wraps non-context
+	// driver errors with fmt.Errorf("failed to execute streaming query: %w", err),
+	// so the handler never sees a bare *neo4j.Neo4jError in production — it
+	// always arrives inside at least one wrapper. errors.As must unwrap through
+	// that layer for the AccessMode interception to hold. This test mirrors the
+	// "timeout classification handles wrapped errors" test above and pins the
+	// same contract for the AccessMode path.
+	t.Run("AccessMode classification handles wrapped errors", func(t *testing.T) {
+		mockDB := db.NewMockService(ctrl)
+		mockDB.EXPECT().
+			GetQueryType(gomock.Any(), "MATCH (n) WHERE false REMOVE n.x RETURN n", gomock.Nil()).
+			Return(neo4j.QueryTypeReadOnly, nil)
+		accessErr := &neo4j.Neo4jError{
+			Code: "Neo.ClientError.Statement.AccessMode",
+			Msg:  "Writing in read access mode not allowed. Attempted write to neo4j",
+		}
+		wrapped := fmt.Errorf("failed to execute streaming query: %w", accessErr)
+		mockDB.EXPECT().
+			ExecuteReadQueryStreaming(gomock.Any(), "MATCH (n) WHERE false REMOVE n.x RETURN n", gomock.Nil(), 1000, 0).
+			Return(nil, wrapped)
+
+		deps := &tools.ToolDependencies{
+			DBService:        mockDB,
+			AnalyticsService: analyticsService,
+			CypherMaxRows:    1000,
+		}
+
+		handler := cypher.ReadCypherHandler(deps)
+		request := mcp.CallToolRequest{
+			Params: mcp.CallToolParams{
+				Arguments: map[string]any{"query": "MATCH (n) WHERE false REMOVE n.x RETURN n"},
+			},
+		}
+
+		result, err := handler(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result == nil || !result.IsError {
+			t.Fatalf("expected error result, got: %+v", result)
+		}
+		text, ok := result.Content[0].(mcp.TextContent)
+		if !ok {
+			t.Fatalf("expected TextContent, got %T", result.Content[0])
+		}
+		if !strings.Contains(text.Text, "use write-cypher instead") {
+			t.Errorf("wrapped AccessMode not classified; check errors.As unwrap path: %s", text.Text)
+		}
+	})
 }

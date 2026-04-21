@@ -9,11 +9,40 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
+
+// readCypherWriteRedirectMessage is the policy message returned whenever
+// read-cypher refuses a query because the underlying operation would mutate
+// the graph or touch an admin/profile surface. It is emitted from two paths:
+//
+//  1. GetQueryType classified the query as non-read-only (the standard path
+//     for CREATE, MERGE, DELETE, SET at the leading verb, plus the PROFILE
+//     pre-flight short-circuit in service.go).
+//
+//  2. ExecuteReadQueryStreaming returned a Neo.ClientError.Statement.AccessMode
+//     error because the read-only session guard at the driver level caught a
+//     write clause that the leading-verb classifier missed (SET or REMOVE in
+//     the middle of an otherwise-read query is the known case).
+//
+// Both paths want the same remediation wording — "use write-cypher instead" —
+// so we hoist the string to a package-level constant. Keeping the wording in
+// one place also keeps it in lockstep with the identical description on the
+// tool itself (see read_cypher_spec.go) so the message the caller sees when
+// refused matches the advertised contract.
+const readCypherWriteRedirectMessage = "read-cypher can only run read-only Cypher statements. For write operations (CREATE, MERGE, DELETE, SET, etc...), schema/admin commands, or PROFILE queries, use write-cypher instead."
+
+// neo4jAccessModeErrorCode is the server-side error code the Neo4j driver
+// surfaces when a write clause runs inside a read-only session. We match on
+// this code rather than on the error message text because the message
+// ("Writing in read access mode not allowed. Attempted write to <dbname>")
+// embeds the database name and could be translated in future driver
+// releases; the code is stable across versions.
+const neo4jAccessModeErrorCode = "Neo.ClientError.Statement.AccessMode"
 
 func ReadCypherHandler(deps *tools.ToolDependencies) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -65,14 +94,33 @@ func handleReadCypher(ctx context.Context, request mcp.CallToolRequest, deps *to
 	// Get queryType by pre-appending "EXPLAIN" to identify if the query is of type "r", if not raise a ToolResultError
 	queryType, err := deps.DBService.GetQueryType(execCtx, Query, Params)
 	if err != nil {
+		// EXPLAIN is rejected via a sentinel rather than an empty row envelope.
+		// The service-side GetQueryType returns ErrExplainUnsupported for any
+		// EXPLAIN-prefixed query; catching it here produces a targeted
+		// remediation ("remove the EXPLAIN prefix") rather than the generic
+		// write-cypher redirect used for true write operations. Redirecting to
+		// write-cypher would be actively misleading here because write-cypher
+		// exhibits the same empty-envelope behaviour for EXPLAIN — the plan is
+		// on ResultSummary, not in the row stream, in both tools. The hint
+		// names the two existing safety rails (planner-estimate guard and
+		// execution timeout) so callers reaching for EXPLAIN as a
+		// runaway-query guard know they don't need it.
+		if errors.Is(err, database.ErrExplainUnsupported) {
+			slog.Info("rejected EXPLAIN query", "query", Query)
+			return mcp.NewToolResultError(
+				"read-cypher does not surface query plans. Remove the EXPLAIN prefix and retry; " +
+					"runaway-query protection is already provided by the planner-estimate guard " +
+					"(NEO4J_CYPHER_MAX_ESTIMATED_ROWS) and the execution timeout. For a profiled " +
+					"plan with runtime statistics, use write-cypher with PROFILE.",
+			), nil
+		}
 		slog.Error("error classifying cypher query", "error", err)
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
 	if queryType != neo4j.QueryTypeReadOnly { // only queryType == "r" are allowed in read-cypher
-		errMessage := "read-cypher can only run read-only Cypher statements. For write operations (CREATE, MERGE, DELETE, SET, etc...), schema/admin commands, or PROFILE queries, use write-cypher instead."
 		slog.Error("rejected non-read query", "type", queryType, "query", Query)
-		return mcp.NewToolResultError(errMessage), nil
+		return mcp.NewToolResultError(readCypherWriteRedirectMessage), nil
 	}
 
 	// EXPLAIN-time estimate guard — the proactive layer above the reactive row cap
@@ -132,6 +180,29 @@ func handleReadCypher(ctx context.Context, request mcp.CallToolRequest, deps *to
 	// this patch.
 	result, err := deps.DBService.ExecuteReadQueryStreaming(execCtx, Query, Params, deps.CypherMaxRows, deps.CypherMaxBytes)
 	if err != nil {
+		// AccessMode is the driver's read-only session guard catching write
+		// clauses that the leading-verb classifier in GetQueryType missed.
+		// SET and REMOVE appearing after an opening MATCH are the known cases:
+		// the classifier sees MATCH, calls the planner for a query-type
+		// verdict, and the planner reports ReadOnly because the plan itself
+		// can be computed read-only — but actually running it would write.
+		// The driver catches this at session execution time and produces a
+		// Neo.ClientError.Statement.AccessMode error. Mapping it to the same
+		// policy message the queryType rejection uses keeps the two refusal
+		// paths UX-consistent: the caller always sees "use write-cypher
+		// instead" regardless of which layer caught them, rather than a clean
+		// message from one path and "Neo4jError: Neo.ClientError.Statement.
+		// AccessMode (Writing in read access mode not allowed...)" from the
+		// other. Checked before the context-error switch because
+		// AccessMode is a Neo4jError, not a context error, so ordering has no
+		// effect on matching — but it reads better to group the two
+		// policy-driven refusals together.
+		var neo4jErr *neo4j.Neo4jError
+		if errors.As(err, &neo4jErr) && neo4jErr.Code == neo4jAccessModeErrorCode {
+			slog.Info("rejected mid-query write via AccessMode guard", "code", neo4jErr.Code, "query", Query)
+			return mcp.NewToolResultError(readCypherWriteRedirectMessage), nil
+		}
+
 		// Classify context errors into user-facing messages that mirror the
 		// truncation-hint pattern elsewhere in this tool: concrete cause,
 		// concrete limit, actionable next step. Anything else surfaces as-is
