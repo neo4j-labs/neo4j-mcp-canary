@@ -74,11 +74,11 @@ func decodeParamsObject(data []byte) (map[string]any, error) {
 // for embedding in an error message. Kept small so error logs stay readable
 // even when a client sends a huge blob.
 func paramsPreview(data []byte) string {
-	const max = 80
-	if len(data) <= max {
+	const maxLen = 80
+	if len(data) <= maxLen {
 		return string(data)
 	}
-	return string(data[:max]) + "…"
+	return string(data[:maxLen]) + "…"
 }
 
 func ConvertNumbers(input any) any {

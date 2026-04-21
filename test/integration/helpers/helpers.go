@@ -278,13 +278,17 @@ func (tc *TestContext) VerifyNodeInDB(label UniqueLabel, props map[string]any) *
 	return records[0]
 }
 
-// AssertNodeProperties validates node properties match expected values
+// AssertNodeProperties validates node properties match expected values.
+// Reads from the camelCase "properties" key — the shape emitted by
+// QueryResultToJSON after the tagged-value wrappers were introduced.
+// Pre-wrapper output used PascalCase "Props" which reflected the Go
+// struct field name rather than the MCP wire convention.
 func (tc *TestContext) AssertNodeProperties(node map[string]any, expectedProps map[string]any) {
 	tc.t.Helper()
 
-	props, ok := node["Props"].(map[string]any)
+	props, ok := node["properties"].(map[string]any)
 	if !ok {
-		tc.t.Fatalf("expected 'Props' to be a map, got %T: %+v", node["Props"], node)
+		tc.t.Fatalf("expected 'properties' to be a map, got %T: %+v", node["properties"], node)
 	}
 
 	for key, expectedVal := range expectedProps {
@@ -301,13 +305,15 @@ func (tc *TestContext) AssertNodeProperties(node map[string]any, expectedProps m
 	}
 }
 
-// AssertNodeHasLabel checks if a node has a specific label
+// AssertNodeHasLabel checks if a node has a specific label. Reads from the
+// camelCase "labels" key, matching the current JSON shape emitted by
+// QueryResultToJSON's tagged-value wrappers.
 func (tc *TestContext) AssertNodeHasLabel(node map[string]any, expectedLabel UniqueLabel) {
 	tc.t.Helper()
 
-	labels, ok := node["Labels"].([]any)
+	labels, ok := node["labels"].([]any)
 	if !ok {
-		tc.t.Fatalf("expected 'Labels' to be a slice, got %T", node["Labels"])
+		tc.t.Fatalf("expected 'labels' to be a slice, got %T", node["labels"])
 	}
 
 	for _, label := range labels {

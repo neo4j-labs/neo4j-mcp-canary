@@ -19,34 +19,14 @@ import (
 )
 
 const (
-	checkApocMetaSchemaQuery = "SHOW PROCEDURES YIELD name WHERE name = 'apoc.meta.schema' RETURN count(name) > 0 AS apocMetaSchemaAvailable"
-	gdsVersionQuery          = "RETURN gds.version() as gdsVersion"
-	vectorIndexCountQuery    = "SHOW INDEXES YIELD type WHERE type = 'VECTOR' RETURN count(*) AS count"
+	gdsVersionQuery = "RETURN gds.version() as gdsVersion"
 )
-
-func apocAvailableRecord(available bool) []*neo4j.Record {
-	return []*neo4j.Record{
-		{
-			Keys:   []string{"apocMetaSchemaAvailable"},
-			Values: []any{available},
-		},
-	}
-}
 
 func gdsVersionRecord(version string) []*neo4j.Record {
 	return []*neo4j.Record{
 		{
 			Keys:   []string{"gdsVersion"},
 			Values: []any{version},
-		},
-	}
-}
-
-func vectorIndexCountRecord(count int64) []*neo4j.Record {
-	return []*neo4j.Record{
-		{
-			Keys:   []string{"count"},
-			Values: []any{count},
 		},
 	}
 }

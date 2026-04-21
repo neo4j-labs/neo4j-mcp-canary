@@ -111,10 +111,13 @@ func filterGDSTools(tools []ToolDefinition) []ToolDefinition {
 // buildToolDependencies creates a ToolDependencies with all config wired through.
 func (s *Neo4jMCPServer) buildToolDependencies() *tools.ToolDependencies {
 	return &tools.ToolDependencies{
-		DBService:        s.dbService,
-		AnalyticsService: s.anService,
-		SchemaSampleSize: int(s.config.SchemaSampleSize),
-		SchemaTimeout:    time.Duration(s.config.SchemaTimeoutSeconds) * time.Second,
+		DBService:              s.dbService,
+		AnalyticsService:       s.anService,
+		SchemaSampleSize:       int(s.config.SchemaSampleSize),
+		CypherMaxRows:          int(s.config.CypherMaxRows),
+		CypherMaxBytes:         int(s.config.CypherMaxBytes),
+		CypherTimeout:          time.Duration(s.config.CypherTimeoutSeconds) * time.Second,
+		CypherMaxEstimatedRows: int(s.config.CypherMaxEstimatedRows),
 	}
 }
 

@@ -47,7 +47,6 @@ type analyticsConfig struct {
 	token       string
 	startupTime int64
 	isAura      bool
-	outboundIP  string
 	mp          *mixpanel.ApiClient
 }
 
@@ -91,7 +90,7 @@ func NewAnalyticsWithClient(mixPanelToken string, mixpanelEndpoint string, clien
 	}
 }
 
-// Retuns true if the string contains a URI used by Aura
+// Returns true if the string contains a URI used by Aura
 // With multiDB, this could be either databases.neo4j.io or instances.neo4j.io
 func isAura(uri string) bool {
 	// Regex to detect our URI of interest

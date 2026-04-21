@@ -624,7 +624,7 @@ func TestAuthMiddleware_AllowsUnauthenticatedPing(t *testing.T) {
 	mockServer.config.AllowUnauthenticatedPing = true
 
 	mockAnalytics := mockServer.anService.(*analytics_mocks.MockService)
-	mockAnalytics.EXPECT().NewUnauthenticatedJsonRpcEvent("ping").Times(1)
+	mockAnalytics.EXPECT().NewUnauthenticatedJSONRPCEvent("ping").Times(1)
 	mockAnalytics.EXPECT().EmitEvent(gomock.Any()).Times(1)
 
 	callback := mockServer.chainMiddleware([]string{}, mockHandler())
@@ -685,7 +685,7 @@ func TestAuthMiddleware_AllowsUnauthenticatedToolsList(t *testing.T) {
 	handler := mockServer.chainMiddleware([]string{}, mockHandler())
 
 	mockAnalytics := mockServer.anService.(*analytics_mocks.MockService)
-	mockAnalytics.EXPECT().NewUnauthenticatedJsonRpcEvent("tools/list").Times(1)
+	mockAnalytics.EXPECT().NewUnauthenticatedJSONRPCEvent("tools/list").Times(1)
 	mockAnalytics.EXPECT().EmitEvent(gomock.Any()).Times(1)
 
 	body := `{"jsonrpc":"2.0","method":"tools/list","params":null,"id":1}`
@@ -749,7 +749,7 @@ func TestAuthMiddleware_AllowsUnauthenticatedInitialize(t *testing.T) {
 	mockServer.config.AllowUnauthenticatedInitialize = true
 
 	mockAnalytics := mockServer.anService.(*analytics_mocks.MockService)
-	mockAnalytics.EXPECT().NewUnauthenticatedJsonRpcEvent("initialize").Times(1)
+	mockAnalytics.EXPECT().NewUnauthenticatedJSONRPCEvent("initialize").Times(1)
 	mockAnalytics.EXPECT().EmitEvent(gomock.Any()).Times(1)
 
 	callback := mockServer.chainMiddleware([]string{}, mockHandler())
@@ -773,7 +773,7 @@ func TestAuthMiddleware_AllowsUnauthenticatedNotificationsInitialize(t *testing.
 	mockServer.config.AllowUnauthenticatedNotificationsInitialize = true
 
 	mockAnalytics := mockServer.anService.(*analytics_mocks.MockService)
-	mockAnalytics.EXPECT().NewUnauthenticatedJsonRpcEvent("notifications/initialized").Times(1)
+	mockAnalytics.EXPECT().NewUnauthenticatedJSONRPCEvent("notifications/initialized").Times(1)
 	mockAnalytics.EXPECT().EmitEvent(gomock.Any()).Times(1)
 
 	callback := mockServer.chainMiddleware([]string{}, mockHandler())

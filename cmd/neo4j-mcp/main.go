@@ -41,7 +41,6 @@ func main() {
 		Database:                       cliArgs.Database,
 		ReadOnly:                       cliArgs.ReadOnly,
 		Telemetry:                      cliArgs.Telemetry,
-		SchemaTimeout:                  cliArgs.SchemaTimeout,
 		TransportMode:                  cliArgs.TransportMode,
 		Port:                           cliArgs.HTTPPort,
 		Host:                           cliArgs.HTTPHost,
