@@ -1,3 +1,5 @@
+<!-- mcp-name: io.github.neo4j-labs/neo4j-mcp-canary -->
+
 # Neo4j MCP Canary — _The canary goes first so the rest of us know what's coming_
 
 Neo4j MCP Canary is a fast-moving, experimental release of the Neo4j MCP server for customers who want to explore emerging capabilities before they are considered for the official server.
