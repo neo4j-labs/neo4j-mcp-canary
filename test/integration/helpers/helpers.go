@@ -91,9 +91,26 @@ func getAnalyticsMock(t *testing.T) *analytics.MockService {
 	analyticsService.EXPECT().Disable().AnyTimes()
 	analyticsService.EXPECT().Enable().AnyTimes()
 	analyticsService.EXPECT().NewGDSProjCreatedEvent().AnyTimes()
+	analyticsService.EXPECT().NewGDSProjDropEvent().AnyTimes()
 	analyticsService.EXPECT().NewStartupEvent(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
-	analyticsService.EXPECT().NewToolEvent(gomock.Any(), gomock.Any()).AnyTimes()
+	analyticsService.EXPECT().NewToolEvent(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 	analyticsService.EXPECT().NewConnectionInitializedEvent(gomock.Any()).AnyTimes()
+	// NewSchemaRetrievalEvent takes nine arguments (outcome, durationMs,
+	// timeoutSeconds, sampleSize, nodeLabelCount, relTypeCount, indexCount,
+	// missingNodeLabelCount, missingRelTypeCount). Matching with gomock.Any()
+	// here accepts any combination; tests that specifically assert schema
+	// telemetry shape should override with a targeted expectation on their own
+	// mock rather than relying on this catch-all.
+	analyticsService.EXPECT().NewSchemaRetrievalEvent(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	// NewCypherEstimateEvent: outcome, estimatedRows, actualRows, truncated,
+	// estimateThreshold, rowCap. Fires from read-cypher when the handler is
+	// configured with CypherMaxEstimatedRows > 0.
+	analyticsService.EXPECT().NewCypherEstimateEvent(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	// NewUnauthenticatedJSONRPCEvent fires on auth failures in HTTP transport
+	// mode. Integration tests generally run the stdio path so this rarely
+	// triggers, but keeping a catch-all expectation avoids runtime surprises
+	// if an auth-related test is added later.
+	analyticsService.EXPECT().NewUnauthenticatedJSONRPCEvent(gomock.Any()).AnyTimes()
 
 	return analyticsService
 }
@@ -234,6 +251,46 @@ func (tc *TestContext) ParseJSONResponse(res *mcp.CallToolResult, v any) {
 	if err := json.Unmarshal([]byte(textContent.Text), v); err != nil {
 		tc.t.Fatalf("failed to parse JSON response: %v\nraw: %s", err, textContent.Text)
 	}
+}
+
+// CypherEnvelope mirrors the JSON shape emitted by read-cypher and write-cypher
+// via QueryResultToJSON (see internal/database/service.go). The envelope carries
+// both the returned rows and the truncation/size metadata so MCP consumers can
+// react to partial results; tests inspect whichever fields are relevant to the
+// behaviour under test.
+//
+// Fields are kept in sync with the service-side cypherResponse by virtue of
+// these tests exercising the real JSON output — if the service shape drifts,
+// assertions here fail loudly with a parse mismatch or a zero-valued field.
+type CypherEnvelope struct {
+	Rows             []map[string]any `json:"rows"`
+	RowCount         int              `json:"rowCount"`
+	Truncated        bool             `json:"truncated"`
+	TruncationReason string           `json:"truncationReason,omitempty"`
+	MaxRows          int              `json:"maxRows,omitempty"`
+	MaxBytes         int              `json:"maxBytes,omitempty"`
+	Hint             string           `json:"hint,omitempty"`
+}
+
+// ParseCypherEnvelope parses the full read-cypher / write-cypher response
+// envelope. Use this when a test needs to inspect truncation flags, row count,
+// the hint text, or any envelope field other than the rows themselves.
+func (tc *TestContext) ParseCypherEnvelope(res *mcp.CallToolResult) CypherEnvelope {
+	tc.t.Helper()
+	var env CypherEnvelope
+	tc.ParseJSONResponse(res, &env)
+	return env
+}
+
+// ParseCypherRecords parses the read-cypher / write-cypher response envelope
+// and returns just the Rows slice. This is the convenience wrapper for tests
+// that only assert on record contents — the common case. Using it in place of
+// a bare `var records []map[string]any; ParseJSONResponse(res, &records)`
+// also prevents a recurring bug: that bare pattern tries to unmarshal the
+// envelope object into a slice and fails with a cryptic type-mismatch error.
+func (tc *TestContext) ParseCypherRecords(res *mcp.CallToolResult) []map[string]any {
+	tc.t.Helper()
+	return tc.ParseCypherEnvelope(res).Rows
 }
 
 // ParseTextResponse parses Text response and returns a string

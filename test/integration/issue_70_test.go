@@ -70,8 +70,7 @@ func TestIssue70(t *testing.T) {
 				},
 			})
 
-			var records []map[string]any
-			tc.ParseJSONResponse(res, &records)
+			records := tc.ParseCypherRecords(res)
 
 			if len(records) != 2 {
 				t.Fatalf("expected 2 company, got %d", len(records))
@@ -111,8 +110,7 @@ func TestIssue70(t *testing.T) {
 				},
 			})
 
-			var records []map[string]any
-			tc.ParseJSONResponse(res, &records)
+			records := tc.ParseCypherRecords(res)
 
 			if len(records) != 1 {
 				t.Fatalf("expected 1 company, got %d", len(records))

@@ -30,8 +30,7 @@ func TestWriteThenRead(t *testing.T) {
 		"params": map[string]any{},
 	})
 
-	var records []map[string]any
-	tc.ParseJSONResponse(res, &records)
+	records := tc.ParseCypherRecords(res)
 
 	if len(records) != 1 {
 		t.Fatalf("expected 1 company, got %d", len(records))
