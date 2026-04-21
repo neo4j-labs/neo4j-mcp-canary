@@ -165,6 +165,7 @@ type CLIOverrides struct {
 	Database                                    string
 	ReadOnly                                    string
 	Telemetry                                   string
+	SchemaSampleSize                            string
 	CypherMaxRows                               string
 	CypherMaxBytes                              string
 	CypherTimeout                               string
@@ -253,6 +254,13 @@ func LoadConfig(cliOverrides *CLIOverrides) (*Config, error) {
 		}
 		if cliOverrides.Telemetry != "" {
 			cfg.Telemetry = ParseBool(cliOverrides.Telemetry, true)
+		}
+		// SchemaSampleSize handling was previously a dead flag — the Args struct
+		// carried the value, but main.go never threaded it into CLIOverrides and
+		// LoadConfig had no branch to apply it. Wiring it here makes
+		// --neo4j-schema-sample-size functional at last.
+		if cliOverrides.SchemaSampleSize != "" {
+			cfg.SchemaSampleSize = ParseInt32(cliOverrides.SchemaSampleSize, DefaultSchemaSampleSize)
 		}
 		if cliOverrides.CypherMaxRows != "" {
 			cfg.CypherMaxRows = ParseInt32(cliOverrides.CypherMaxRows, DefaultCypherMaxRows)
