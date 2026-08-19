@@ -92,7 +92,7 @@ func getAnalyticsMock(t *testing.T) *analytics.MockService {
 	analyticsService.EXPECT().Enable().AnyTimes()
 	analyticsService.EXPECT().NewGDSProjCreatedEvent().AnyTimes()
 	analyticsService.EXPECT().NewGDSProjDropEvent().AnyTimes()
-	analyticsService.EXPECT().NewStartupEvent(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	analyticsService.EXPECT().NewStartupEvent(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 	analyticsService.EXPECT().NewToolEvent(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 	analyticsService.EXPECT().NewConnectionInitializedEvent(gomock.Any()).AnyTimes()
 	// NewSchemaRetrievalEvent takes nine arguments (outcome, durationMs,

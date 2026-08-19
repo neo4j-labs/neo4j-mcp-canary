@@ -22,6 +22,19 @@ const (
 	ModeQueryAPI
 )
 
+// String returns a short, stable label for the mode ("bolt" or
+// "query_api"), suitable for logging and telemetry properties. Not intended
+// for anything protocol-facing — it exists purely for human/analytics
+// consumption.
+func (m Mode) String() string {
+	switch m {
+	case ModeQueryAPI:
+		return "query_api"
+	default:
+		return "bolt"
+	}
+}
+
 // DetectMode inspects the scheme of uri and reports which backend should be
 // used to talk to Neo4j: the Query API for http/https, the Bolt driver for
 // everything else (bolt, bolt+s, bolt+ssc, neo4j, neo4j+s, neo4j+ssc).

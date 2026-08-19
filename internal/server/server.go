@@ -22,6 +22,7 @@ import (
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/queryapi"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -175,7 +176,13 @@ func (s *Neo4jMCPServer) verifyRequirements(ctx context.Context) error {
 
 // emitServerStartupEvent emits the server startup event immediately with available info (no DB query)
 func (s *Neo4jMCPServer) emitServerStartupEvent() {
-	s.anService.EmitEvent(s.anService.NewStartupEvent(s.config.TransportMode, s.config.HTTPTLSEnabled, s.version))
+	// DetectMode is a pure scheme check (no network access), so it's safe to
+	// recompute here rather than threading the mode through the constructor.
+	// A malformed URI would already have failed at connection-setup time in
+	// main.go before the server ever got this far, so the error here is
+	// ignored — ModeBolt is DetectMode's safe zero-value fallback.
+	connMode, _ := queryapi.DetectMode(s.config.URI)
+	s.anService.EmitEvent(s.anService.NewStartupEvent(s.config.TransportMode, s.config.HTTPTLSEnabled, s.version, connMode.String()))
 }
 
 // emitConnectionInitializedEvent emits the connection initialized event with DB information (STDIO mode only)

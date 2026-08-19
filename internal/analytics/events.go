@@ -36,9 +36,14 @@ type baseProperties struct {
 // serverStartupProperties contains server-level information available at startup (no DB query required)
 type serverStartupProperties struct {
 	baseProperties
-	McpVersion    string               `json:"mcp_version"`
-	TransportMode config.TransportMode `json:"transport_mode"`
-	TLSEnabled    *bool                `json:"tls_enabled,omitempty"` // Only for HTTP mode, pointer allows explicit false
+	McpVersion string `json:"mcp_version"`
+	// ConnectionMode is "bolt" or "query_api", derived from the scheme of
+	// NEO4J_URI (see queryapi.DetectMode) — which wire protocol the server
+	// uses to talk to Neo4j. Unlike TransportMode (the MCP client-facing
+	// transport), this is about the Neo4j-facing connection.
+	ConnectionMode string               `json:"connection_mode"`
+	TransportMode  config.TransportMode `json:"transport_mode"`
+	TLSEnabled     *bool                `json:"tls_enabled,omitempty"` // Only for HTTP mode, pointer allows explicit false
 }
 
 // connectionInitializedProperties contains Neo4j-specific information (requires DB query)
@@ -113,10 +118,11 @@ type ConnectionEventInfo struct {
 }
 
 // NewStartupEvent creates a server startup event with information available immediately (no DB query)
-func (a *Analytics) NewStartupEvent(transportMode config.TransportMode, tlsEnabled bool, mcpVersion string) TrackEvent {
+func (a *Analytics) NewStartupEvent(transportMode config.TransportMode, tlsEnabled bool, mcpVersion string, connectionMode string) TrackEvent {
 	props := serverStartupProperties{
 		baseProperties: a.getBaseProperties(),
 		McpVersion:     mcpVersion,
+		ConnectionMode: connectionMode,
 		TransportMode:  transportMode,
 	}
 

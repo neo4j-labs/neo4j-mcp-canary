@@ -46,7 +46,7 @@ func TestNewNeo4jMCPServer(t *testing.T) {
 	analyticsService := analytics.NewMockService(ctrl)
 	analyticsService.EXPECT().IsEnabled().AnyTimes().Return(true)
 	analyticsService.EXPECT().EmitEvent(gomock.Any()).AnyTimes()
-	analyticsService.EXPECT().NewStartupEvent(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	analyticsService.EXPECT().NewStartupEvent(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 	analyticsService.EXPECT().NewConnectionInitializedEvent(gomock.Any()).AnyTimes()
 
 	t.Run("starts server successfully", func(t *testing.T) {
@@ -169,7 +169,7 @@ func TestNewNeo4jMCPServerEvents(t *testing.T) {
 
 	t.Run("emits startup and OSInfoEvent and StartupEvent events on start", func(t *testing.T) {
 		analyticsService.EXPECT().IsEnabled().Times(1).Return(true)
-		analyticsService.EXPECT().NewStartupEvent(config.TransportModeStdio, false, "test-version").Times(1)
+		analyticsService.EXPECT().NewStartupEvent(config.TransportModeStdio, false, "test-version", "bolt").Times(1)
 		analyticsService.EXPECT().NewConnectionInitializedEvent(analyticsReal.ConnectionEventInfo{
 			Neo4jVersion:  "5.18.0",
 			Edition:       "enterprise",
