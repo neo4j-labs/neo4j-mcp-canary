@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
 )
 
@@ -14,6 +15,12 @@ import (
 type ToolDependencies struct {
 	DBService        database.Service
 	AnalyticsService analytics.Service
+	// OutputFormat controls the wire format tool responses are rendered in
+	// before being sent back to the LLM client — "json" (default) or
+	// "toon". Handlers that produce a JSON payload should route it through
+	// tools.EncodeOutput with this field rather than deciding the format
+	// themselves.
+	OutputFormat config.OutputFormat
 	// SchemaSampleSize is forwarded to apoc.meta.schema's `sample` parameter
 	// and caps how many nodes per label APOC examines when inferring the schema.
 	SchemaSampleSize int

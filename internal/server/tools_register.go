@@ -115,6 +115,7 @@ func (s *Neo4jMCPServer) buildToolDependencies() *tools.ToolDependencies {
 	return &tools.ToolDependencies{
 		DBService:              s.dbService,
 		AnalyticsService:       s.anService,
+		OutputFormat:           s.config.OutputFormat,
 		SchemaSampleSize:       int(s.config.SchemaSampleSize),
 		CypherMaxRows:          int(s.config.CypherMaxRows),
 		CypherMaxBytes:         int(s.config.CypherMaxBytes),

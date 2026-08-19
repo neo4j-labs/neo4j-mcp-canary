@@ -134,6 +134,18 @@ var fields = []Field{
 		},
 	},
 	{
+		Name: "OutputFormat", EnvVar: "NEO4J_OUTPUT_FORMAT", FlagName: "neo4j-output-format",
+		Placeholder: "FORMAT", Description: "Tool response format sent to the LLM client: json or toon", DefaultDisplay: "json",
+		Setter: func(cfg *Config, raw string) {
+			format := OutputFormat(defaultString(raw, string(OutputFormatJSON)))
+			if !slices.Contains(ValidOutputFormats, format) {
+				fmt.Fprintf(os.Stderr, "Warning: invalid NEO4J_OUTPUT_FORMAT '%s', using default 'json'. Valid values: %v\n", format, ValidOutputFormats)
+				format = OutputFormatJSON
+			}
+			cfg.OutputFormat = format
+		},
+	},
+	{
 		Name: "SchemaSampleSize", EnvVar: "NEO4J_SCHEMA_SAMPLE_SIZE", FlagName: "neo4j-schema-sample-size",
 		Placeholder: "INT", Description: "Number of nodes per label APOC samples when inferring schema", DefaultDisplay: "1000",
 		Setter: func(cfg *Config, raw string) { cfg.SchemaSampleSize = ParseInt32(raw, DefaultSchemaSampleSize) },

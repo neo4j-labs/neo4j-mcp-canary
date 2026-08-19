@@ -248,6 +248,11 @@ func handleReadCypher(ctx context.Context, request mcp.CallToolRequest, deps *to
 		slog.Error("error formatting query results", "error", err)
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	response, err = tools.EncodeOutput(response, deps.OutputFormat)
+	if err != nil {
+		slog.Error("error encoding query results", "error", err)
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 
 	// Emit the estimate-vs-actual telemetry only when the guard was active — if
 	// the operator has disabled it (CypherMaxEstimatedRows == 0) there's no

@@ -73,7 +73,12 @@ func handleGetSchema(ctx context.Context, deps *tools.ToolDependencies, schemaSa
 		slog.Error("failed to serialize structured schema", "error", err)
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	return mcp.NewToolResultText(string(jsonData)), nil
+	response, err := tools.EncodeOutput(string(jsonData), deps.OutputFormat)
+	if err != nil {
+		slog.Error("failed to encode structured schema", "error", err)
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(response), nil
 }
 
 // --- Output types ---

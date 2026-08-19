@@ -205,6 +205,7 @@ Core connection and behaviour:
 | `NEO4J_SCHEMA_SAMPLE_SIZE`        | `1000`    | Nodes per label APOC examines when inferring schema                      |
 | `NEO4J_LOG_LEVEL`                 | `info`    | `debug`, `info`, `notice`, `warning`, `error`, `critical`, `alert`, `emergency` |
 | `NEO4J_LOG_FORMAT`                | `text`    | `text` or `json`                                                         |
+| `NEO4J_OUTPUT_FORMAT`             | `json`    | Tool response format sent to the LLM client: `json` or `toon`           |
 | `NEO4J_TRANSPORT_MODE`            | `stdio`   | `stdio` or `http` (supersedes the deprecated `NEO4J_MCP_TRANSPORT`)      |
 
 #### Connecting via the Query API instead of Bolt
@@ -268,6 +269,7 @@ Available flags:
 - `--neo4j-read-only` — overrides `NEO4J_READ_ONLY` (`true` / `false`)
 - `--neo4j-telemetry` — overrides `NEO4J_TELEMETRY` (`true` / `false`)
 - `--neo4j-schema-sample-size` — overrides `NEO4J_SCHEMA_SAMPLE_SIZE`
+- `--neo4j-output-format` — overrides `NEO4J_OUTPUT_FORMAT` (`json` / `toon`)
 
 **Cypher execution safeguards**
 
@@ -318,6 +320,41 @@ neo4j_cypher_max_rows: 500
 The equivalent JSON is also accepted (`.json` extension). Only scalar values (strings, numbers, booleans) are supported — a nested object or list is a startup error. Values from CLI flags or environment variables always take precedence over the config file; a `--config-file` that fails to read or parse is a startup error.
 
 Adding a new configuration parameter to the server (env var + CLI flag + config-file key, all at once) means adding one entry to the `fields` slice in [`internal/config/schema.go`](internal/config/schema.go) — see that file's doc comments for the shape.
+
+### Response Format (JSON vs TOON)
+
+Tool responses (`read-cypher`, `write-cypher`, `get-schema`, `list-gds-procedures`) are rendered as JSON by default. Set `NEO4J_OUTPUT_FORMAT` (or `--neo4j-output-format`) to `toon` to render them as [TOON](https://github.com/toon-format/toon-go) (Token-Oriented Object Notation) instead — a compact, still human-readable format that cuts LLM token usage versus JSON, especially for the tabular row shapes these tools return:
+
+```bash
+neo4j-mcp-canary --neo4j-output-format toon
+# or
+NEO4J_OUTPUT_FORMAT=toon neo4j-mcp-canary
+```
+
+A `read-cypher` result as JSON:
+
+```json
+{
+  "rows": [
+    { "name": "Alice", "age": 30 },
+    { "name": "Bob", "age": 25 }
+  ],
+  "rowCount": 2,
+  "truncated": false
+}
+```
+
+The same result as TOON:
+
+```
+rowCount: 2
+rows[2]{age,name}:
+  30,Alice
+  25,Bob
+truncated: false
+```
+
+An invalid value falls back to `json` with a warning on stderr, the same way `NEO4J_LOG_FORMAT` does.
 
 ## Cypher Execution Safeguards
 

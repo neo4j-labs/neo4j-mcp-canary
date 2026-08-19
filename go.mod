@@ -11,6 +11,7 @@ require (
 	github.com/neo4j/neo4j-go-driver/v6 v6.2.0
 	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go v0.44.0
+	github.com/toon-format/toon-go v0.0.0-20251202084852-7ca0e27c4e8c
 	go.uber.org/mock v0.6.0
 	go.yaml.in/yaml/v3 v3.0.5
 )
