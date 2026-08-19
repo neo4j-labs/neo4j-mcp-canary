@@ -71,6 +71,51 @@ neo4j-mcp-canary -v
 
 Should print the installed version.
 
+## Building from Source
+
+Requires Go 1.25.3+ (see `go.mod`).
+
+Build for your current platform with [Task](https://taskfile.dev):
+
+```bash
+task build
+```
+
+This produces `bin/neo4j-mcp-canary`. Without Task, the equivalent is:
+
+```bash
+go build -C cmd/neo4j-mcp -o ../../bin/
+```
+
+### Cross-compiling for macOS / Linux
+
+Cross-compile by setting `GOOS`/`GOARCH` and disabling cgo (the codebase is
+pure Go, so `CGO_ENABLED=0` produces a fully static binary with no runtime
+dependencies on the target machine):
+
+```bash
+CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -C cmd/neo4j-mcp -o ../../dist/neo4j-mcp-canary_darwin_amd64
+CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -C cmd/neo4j-mcp -o ../../dist/neo4j-mcp-canary_darwin_arm64
+CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -C cmd/neo4j-mcp -o ../../dist/neo4j-mcp-canary_linux_amd64
+CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -C cmd/neo4j-mcp -o ../../dist/neo4j-mcp-canary_linux_arm64
+```
+
+To stamp a version into the binary (`-v` / `--version`), pass an `ldflags`
+override — this is what the release pipeline does for tagged builds:
+
+```bash
+go build -C cmd/neo4j-mcp -o ../../dist/neo4j-mcp-canary \
+  -ldflags "-X 'main.Version=$(git rev-parse --short HEAD)'"
+```
+
+Without it, `Version` defaults to `"development"`, which also disables
+telemetry regardless of `NEO4J_TELEMETRY` (see [Telemetry](#telemetry)).
+
+Official multi-platform release archives (including Windows) are built by
+[GoReleaser](https://goreleaser.com/) per `.goreleaser.yaml` — see
+[Installation (Binary)](#installation-binary) to download those instead of
+building locally.
+
 ## Transport Modes
 
 The Neo4j MCP Canary server supports two transport modes:
