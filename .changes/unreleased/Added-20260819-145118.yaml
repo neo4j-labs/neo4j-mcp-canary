@@ -1,3 +1,0 @@
-kind: Added
-body: Support an optional JSON/YAML config file as a new lowest-priority configuration source (below environment variables, below CLI flags) via --config-file / NEO4J_CONFIG_FILE. As part of this refactor, the four NEO4J_HTTP_ALLOW_UNAUTHENTICATED_* flags now consistently default to true when given an invalid value from any source (previously a malformed CLI value fell back to false while a malformed env var fell back to true).
-time: 2026-08-19T14:51:18.895661+01:00
