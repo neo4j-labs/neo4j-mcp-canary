@@ -227,6 +227,44 @@ func (c *MockServiceNewConnectionInitializedEventCall) DoAndReturn(f func(analyt
 	return c
 }
 
+// NewFeedbackEvent mocks base method.
+func (m *MockService) NewFeedbackEvent(feedback string) analytics.TrackEvent {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NewFeedbackEvent", feedback)
+	ret0, _ := ret[0].(analytics.TrackEvent)
+	return ret0
+}
+
+// NewFeedbackEvent indicates an expected call of NewFeedbackEvent.
+func (mr *MockServiceMockRecorder) NewFeedbackEvent(feedback any) *MockServiceNewFeedbackEventCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewFeedbackEvent", reflect.TypeOf((*MockService)(nil).NewFeedbackEvent), feedback)
+	return &MockServiceNewFeedbackEventCall{Call: call}
+}
+
+// MockServiceNewFeedbackEventCall wrap *gomock.Call
+type MockServiceNewFeedbackEventCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockServiceNewFeedbackEventCall) Return(arg0 analytics.TrackEvent) *MockServiceNewFeedbackEventCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockServiceNewFeedbackEventCall) Do(f func(string) analytics.TrackEvent) *MockServiceNewFeedbackEventCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockServiceNewFeedbackEventCall) DoAndReturn(f func(string) analytics.TrackEvent) *MockServiceNewFeedbackEventCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // NewGDSProjCreatedEvent mocks base method.
 func (m *MockService) NewGDSProjCreatedEvent() analytics.TrackEvent {
 	m.ctrl.T.Helper()

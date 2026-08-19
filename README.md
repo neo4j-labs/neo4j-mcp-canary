@@ -388,6 +388,7 @@ Provided tools:
 | `read-cypher`         | `true`   | Execute arbitrary read-only Cypher                   | Rejects writes, schema/admin DDL, `EXPLAIN`, and `PROFILE`. See [Cypher Execution Safeguards](#cypher-execution-safeguards).   |
 | `write-cypher`        | `false`  | Execute arbitrary Cypher (write mode)                | **Caution:** LLM-generated queries can cause harm. Use only in development environments. Not registered when `NEO4J_READ_ONLY=true`. |
 | `list-gds-procedures` | `true`   | List GDS procedures available in the Neo4j instance  | Disabled automatically if GDS is not installed.                                                                                |
+| `give-feedback`       | `true`   | Submit free-text feedback about the MCP server itself | For feedback on the server (tools, behaviour, docs), not on Cypher/database issues. Limited to 300 characters. See [Feedback](#feedback). |
 
 ### Read-only mode flag
 
@@ -429,6 +430,12 @@ Driver types are wrapped in camelCase JSON shapes matching Cypher conventions:
 - **Date / Time / DateTime / LocalTime / LocalDateTime / Duration:** ISO 8601 strings
 
 Deprecated numeric `id` / `startId` / `endId` identifiers are **not** surfaced — `elementId` / `startElementId` / `endElementId` are the only identifiers returned.
+
+### Feedback
+
+`give-feedback` lets an agent submit free-text feedback about the MCP server itself — positive or negative — as a single `feedback` string argument, capped at 300 characters (enforced both in the advertised tool schema and by the handler, in case a client doesn't validate the schema before sending). It's for feedback on the server's tools, behaviour, or documentation, not for reporting Cypher/database errors.
+
+Feedback is sent as a Mixpanel event alongside the server's other telemetry, so it is only recorded when telemetry is enabled (see [Telemetry](#telemetry)) — the tool call itself always succeeds either way.
 
 ## Usage Guidance
 

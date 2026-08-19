@@ -474,6 +474,17 @@ func TestEventCreation(t *testing.T) {
 		}
 	})
 
+	t.Run("NewFeedbackEvent", func(t *testing.T) {
+		event := analyticsService.NewFeedbackEvent("This tool is great!")
+		if event.Event != "MCP-NEO4J-CANARY_FEEDBACK" {
+			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP-NEO4J-CANARY_FEEDBACK")
+		}
+		props := assertBaseProperties(t, event.Properties)
+		if props["feedback"] != "This tool is great!" {
+			t.Errorf("unexpected feedback: got %v, want %v", props["feedback"], "This tool is great!")
+		}
+	})
+
 	t.Run("NewStartupEvent with Aura database", func(t *testing.T) {
 		auraAnalytics := newTestAnalytics(t, "test-token", "http://localhost", nil, "bolt://mydb.databases.neo4j.io")
 		event := auraAnalytics.NewStartupEvent(config.TransportModeHTTP, false, "1.0.0", "bolt")

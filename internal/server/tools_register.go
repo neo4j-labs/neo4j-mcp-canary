@@ -8,6 +8,7 @@ import (
 
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/cypher"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/feedback"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/gds"
 
 	"github.com/mark3labs/mcp-go/server"
@@ -30,8 +31,9 @@ type toolFilter func(tools []ToolDefinition) []ToolDefinition
 type toolCategory int
 
 const (
-	cypherCategory toolCategory = 0
-	gdsCategory    toolCategory = 1
+	cypherCategory   toolCategory = 0
+	gdsCategory      toolCategory = 1
+	feedbackCategory toolCategory = 2
 )
 
 type ToolDefinition struct {
@@ -155,6 +157,15 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 			definition: server.ServerTool{
 				Tool:    gds.ListGDSProceduresSpec(),
 				Handler: gds.ListGdsProceduresHandler(deps),
+			},
+			readonly: true,
+		},
+		// Feedback Category/Section
+		{
+			category: feedbackCategory,
+			definition: server.ServerTool{
+				Tool:    feedback.GiveFeedbackSpec(),
+				Handler: feedback.GiveFeedbackHandler(deps),
 			},
 			readonly: true,
 		},
