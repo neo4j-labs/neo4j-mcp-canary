@@ -98,6 +98,10 @@ type toolProperties struct {
 	VectorSearch       *bool  `json:"vectorSearch,omitempty"`
 	VectorPropertySet  *bool  `json:"vectorPropertySet,omitempty"`
 	FullTextSearch     *bool  `json:"fullTextSearch,omitempty"`
+	// OutputFormat is the configured NEO4J_OUTPUT_FORMAT active for this call
+	// ("json" or "toon") — lets the Mixpanel stream break tool usage down by
+	// which response format callers are actually using.
+	OutputFormat config.OutputFormat `json:"output_format"`
 }
 
 type TrackEvent struct {
@@ -162,11 +166,12 @@ func (a *Analytics) NewConnectionInitializedEvent(connInfo ConnectionEventInfo) 
 // NewToolEvent creates a tool usage event (used for both STDIO and HTTP modes)
 // Note: Connection info (Neo4j version, edition) is sent separately in CONNECTION_INITIALIZED event
 // The vectorInfo parameter is optional; when non-nil, vector-related properties are included.
-func (a *Analytics) NewToolEvent(toolsUsed string, success bool, vectorInfo *ToolVectorInfo) TrackEvent {
+func (a *Analytics) NewToolEvent(toolsUsed string, success bool, vectorInfo *ToolVectorInfo, outputFormat config.OutputFormat) TrackEvent {
 	props := toolProperties{
 		baseProperties: a.getBaseProperties(),
 		ToolUsed:       toolsUsed,
 		Success:        success,
+		OutputFormat:   outputFormat,
 	}
 	if vectorInfo != nil {
 		props.VectorIndexCount = vectorInfo.VectorIndexCount

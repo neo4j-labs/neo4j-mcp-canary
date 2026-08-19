@@ -457,7 +457,7 @@ func (s *Neo4jMCPServer) handleToolCallComplete(_ context.Context, _ any, reques
 	}
 
 	// Emit tool event (connection info sent separately in CONNECTION_INITIALIZED event)
-	s.anService.EmitEvent(s.anService.NewToolEvent(toolName, success, vectorInfo))
+	s.anService.EmitEvent(s.anService.NewToolEvent(toolName, success, vectorInfo, s.config.OutputFormat))
 
 	// Handle GDS events for cypher tools
 	if toolName == "read-cypher" || toolName == "write-cypher" {

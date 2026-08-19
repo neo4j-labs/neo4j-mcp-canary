@@ -96,6 +96,11 @@ func handleWriteCypher(ctx context.Context, request mcp.CallToolRequest, deps *t
 		slog.Error("error formatting query results", "error", err)
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	response, err = tools.EncodeOutput(response, deps.OutputFormat)
+	if err != nil {
+		slog.Error("error encoding query results", "error", err)
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 
 	return mcp.NewToolResultText(response), nil
 }

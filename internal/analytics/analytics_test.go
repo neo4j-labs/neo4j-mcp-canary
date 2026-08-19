@@ -205,7 +205,7 @@ func TestEventCreation(t *testing.T) {
 	})
 
 	t.Run("NewToolEvent without vector info", func(t *testing.T) {
-		event := analyticsService.NewToolEvent("gds", true, nil)
+		event := analyticsService.NewToolEvent("gds", true, nil, config.OutputFormatJSON)
 		if event.Event != "MCP-NEO4J-CANARY_TOOL_USED" {
 			t.Errorf("unexpected event name: got %s, want %s", event.Event, "MCP-NEO4J-CANARY_TOOL_USED")
 		}
@@ -215,6 +215,9 @@ func TestEventCreation(t *testing.T) {
 		}
 		if props["success"] != true {
 			t.Errorf("unexpected success: got %v, want %v", props["success"], true)
+		}
+		if props["output_format"] != string(config.OutputFormatJSON) {
+			t.Errorf("unexpected output_format: got %v, want %v", props["output_format"], config.OutputFormatJSON)
 		}
 		// Vector properties should not be present when vectorInfo is nil
 		if _, exists := props["vectorIndex"]; exists {
@@ -228,12 +231,20 @@ func TestEventCreation(t *testing.T) {
 		}
 	})
 
+	t.Run("NewToolEvent with TOON output format", func(t *testing.T) {
+		event := analyticsService.NewToolEvent("read-cypher", true, nil, config.OutputFormatTOON)
+		props := assertBaseProperties(t, event.Properties)
+		if props["output_format"] != string(config.OutputFormatTOON) {
+			t.Errorf("unexpected output_format: got %v, want %v", props["output_format"], config.OutputFormatTOON)
+		}
+	})
+
 	t.Run("NewToolEvent with vector index count for get-schema", func(t *testing.T) {
 		count := 3
 		vectorInfo := &analytics.ToolVectorInfo{
 			VectorIndexCount: &count,
 		}
-		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo)
+		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo, config.OutputFormatJSON)
 		props := assertBaseProperties(t, event.Properties)
 		if props["tools_used"] != "get-schema" {
 			t.Errorf("unexpected tools_used: got %v, want %v", props["tools_used"], "get-schema")
@@ -252,7 +263,7 @@ func TestEventCreation(t *testing.T) {
 		vectorInfo := &analytics.ToolVectorInfo{
 			VectorIndexCount: &count,
 		}
-		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo)
+		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo, config.OutputFormatJSON)
 		props := assertBaseProperties(t, event.Properties)
 		// Even with 0, the field should be present since the pointer is non-nil
 		if props["vectorIndex"] != float64(0) {
@@ -267,7 +278,7 @@ func TestEventCreation(t *testing.T) {
 			VectorIndexCount:   &vectorCount,
 			FullTextIndexCount: &fulltextCount,
 		}
-		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo)
+		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo, config.OutputFormatJSON)
 		props := assertBaseProperties(t, event.Properties)
 		if props["vectorIndex"] != float64(2) {
 			t.Errorf("unexpected vectorIndex: got %v, want %v", props["vectorIndex"], 2)
@@ -282,7 +293,7 @@ func TestEventCreation(t *testing.T) {
 		vectorInfo := &analytics.ToolVectorInfo{
 			VectorIndexCount: &vectorCount,
 		}
-		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo)
+		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo, config.OutputFormatJSON)
 		props := assertBaseProperties(t, event.Properties)
 		if _, exists := props["fullTextIndex"]; exists {
 			t.Errorf("fullTextIndex should not be present when not set")
@@ -296,7 +307,7 @@ func TestEventCreation(t *testing.T) {
 			VectorSearch:      &vectorSearch,
 			VectorPropertySet: &vectorPropertySet,
 		}
-		event := analyticsService.NewToolEvent("write-cypher", true, vectorInfo)
+		event := analyticsService.NewToolEvent("write-cypher", true, vectorInfo, config.OutputFormatJSON)
 		props := assertBaseProperties(t, event.Properties)
 		if props["vectorSearch"] != false {
 			t.Errorf("unexpected vectorSearch: got %v, want %v", props["vectorSearch"], false)
@@ -311,7 +322,7 @@ func TestEventCreation(t *testing.T) {
 		vectorInfo := &analytics.ToolVectorInfo{
 			FullTextSearch: &fullTextSearch,
 		}
-		event := analyticsService.NewToolEvent("read-cypher", true, vectorInfo)
+		event := analyticsService.NewToolEvent("read-cypher", true, vectorInfo, config.OutputFormatJSON)
 		props := assertBaseProperties(t, event.Properties)
 		if props["fullTextSearch"] != true {
 			t.Errorf("unexpected fullTextSearch: got %v, want %v", props["fullTextSearch"], true)
@@ -323,7 +334,7 @@ func TestEventCreation(t *testing.T) {
 		vectorInfo := &analytics.ToolVectorInfo{
 			VectorIndexCount: &vectorCount,
 		}
-		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo)
+		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo, config.OutputFormatJSON)
 		props := assertBaseProperties(t, event.Properties)
 		if _, exists := props["fullTextSearch"]; exists {
 			t.Errorf("fullTextSearch should not be present when not set")

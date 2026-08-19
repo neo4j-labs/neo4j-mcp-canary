@@ -45,6 +45,11 @@ func handleListGdsProcedures(ctx context.Context, deps *tools.ToolDependencies) 
 		slog.Error("failed to format list-gds-procedures results to JSON", "error", err)
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	response, err = tools.EncodeOutput(response, deps.OutputFormat)
+	if err != nil {
+		slog.Error("failed to encode list-gds-procedures results", "error", err)
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 
 	return mcp.NewToolResultText(response), nil
 }

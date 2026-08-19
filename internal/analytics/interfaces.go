@@ -26,7 +26,7 @@ type Service interface {
 	NewGDSProjDropEvent() TrackEvent
 	NewStartupEvent(transportMode config.TransportMode, tlsEnabled bool, mcpServer string, connectionMode string) TrackEvent
 	NewConnectionInitializedEvent(connInfo ConnectionEventInfo) TrackEvent
-	NewToolEvent(toolsUsed string, success bool, vectorInfo *ToolVectorInfo) TrackEvent
+	NewToolEvent(toolsUsed string, success bool, vectorInfo *ToolVectorInfo, outputFormat config.OutputFormat) TrackEvent
 	NewSchemaRetrievalEvent(outcome string, durationMs int64, timeoutSeconds float64, sampleSize, nodeLabelCount, relTypeCount, indexCount, missingNodeLabelCount, missingRelTypeCount int) TrackEvent
 	NewCypherEstimateEvent(outcome string, estimatedRows int64, actualRows int, truncated bool, estimateThreshold, rowCap int) TrackEvent
 	NewUnauthenticatedJSONRPCEvent(jsonRPCRequest string) TrackEvent

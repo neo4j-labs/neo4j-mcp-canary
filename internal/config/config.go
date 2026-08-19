@@ -69,6 +69,25 @@ const (
 // ValidTransportModes defines the allowed transport mode values
 var ValidTransportModes = []TransportMode{TransportModeStdio, TransportModeHTTP}
 
+// OutputFormat identifies the wire format tool responses are rendered in
+// before being sent back to the LLM client.
+type OutputFormat string
+
+const (
+	// OutputFormatJSON renders tool responses as JSON (the default,
+	// unchanged behaviour).
+	OutputFormatJSON OutputFormat = "json"
+	// OutputFormatTOON renders tool responses as TOON (Token-Oriented Object
+	// Notation), a compact format that cuts token usage versus JSON —
+	// particularly for the tabular row shapes read-cypher/write-cypher and
+	// list-gds-procedures return — at the cost of being less familiar to
+	// generic JSON tooling.
+	OutputFormatTOON OutputFormat = "toon"
+)
+
+// ValidOutputFormats defines the allowed output format values.
+var ValidOutputFormats = []OutputFormat{OutputFormatJSON, OutputFormatTOON}
+
 // Config holds the application configuration
 type Config struct {
 	URI                                         string
@@ -79,6 +98,7 @@ type Config struct {
 	Telemetry                                   bool // If false, disables telemetry
 	LogLevel                                    string
 	LogFormat                                   string
+	OutputFormat                                OutputFormat // Tool response format sent to the LLM client: "json" (default) or "toon"
 	SchemaSampleSize                            int32
 	CypherMaxRows                               int32         // Per-call row cap applied by read-cypher and write-cypher; 0 disables the cap
 	CypherMaxBytes                              int32         // Per-call byte cap applied alongside CypherMaxRows; 0 disables the cap
