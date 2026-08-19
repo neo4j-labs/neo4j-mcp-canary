@@ -1,0 +1,2 @@
+kind: Added
+body: "Added a \"Building from Source\" section to the README covering local builds via Task/go build, cross-compiling for macOS and Linux (amd64/arm64) with CGO_ENABLED=0, stamping a version via -ldflags, and a pointer to GoReleaser for official multi-platform release archives."
