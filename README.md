@@ -188,7 +188,7 @@ For detailed instructions on certificate generation, TLS testing, and production
 
 ## Configuration Options
 
-The `neo4j-mcp-canary` server is configured via environment variables and/or CLI flags. **CLI flags take precedence over environment variables.**
+The `neo4j-mcp-canary` server is configured via environment variables, CLI flags, and/or an optional config file. **CLI flags take precedence over environment variables, which take precedence over an optional config file.**
 
 ### Environment Variables
 
@@ -292,6 +292,32 @@ Available flags:
 - `--neo4j-http-allow-unauthenticated-notifications-initialize` — overrides `NEO4J_HTTP_ALLOW_UNAUTHENTICATED_NOTIFICATIONS_INITIALIZE`
 
 Run `neo4j-mcp-canary --help` to see the complete list with descriptions.
+
+### Configuration File
+
+As a lowest-priority alternative to environment variables, `neo4j-mcp-canary` can read configuration from an optional JSON or YAML file:
+
+```bash
+neo4j-mcp-canary --config-file /etc/neo4j-mcp/config.yaml
+# or
+NEO4J_CONFIG_FILE=/etc/neo4j-mcp/config.yaml neo4j-mcp-canary
+```
+
+Keys are the lower-cased form of the environment variable they correspond to:
+
+```yaml
+neo4j_uri: bolt://localhost:7687
+neo4j_username: neo4j
+neo4j_password: password
+neo4j_read_only: false
+neo4j_transport_mode: http
+neo4j_http_tls_enabled: true
+neo4j_cypher_max_rows: 500
+```
+
+The equivalent JSON is also accepted (`.json` extension). Only scalar values (strings, numbers, booleans) are supported — a nested object or list is a startup error. Values from CLI flags or environment variables always take precedence over the config file; a `--config-file` that fails to read or parse is a startup error.
+
+Adding a new configuration parameter to the server (env var + CLI flag + config-file key, all at once) means adding one entry to the `fields` slice in [`internal/config/schema.go`](internal/config/schema.go) — see that file's doc comments for the shape.
 
 ## Cypher Execution Safeguards
 

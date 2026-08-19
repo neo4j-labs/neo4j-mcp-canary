@@ -216,11 +216,11 @@ func TestLoadConfig_CLIOverrides(t *testing.T) {
 	t.Setenv("NEO4J_PASSWORD", "env-pass")
 	t.Setenv("NEO4J_DATABASE", "env-db")
 
-	overrides := &CLIOverrides{
-		URI:      "bolt://cli-host:7687",
-		Username: "cli-user",
-		Password: "cli-pass",
-		Database: "cli-db",
+	overrides := CLIOverrides{
+		"URI":      "bolt://cli-host:7687",
+		"Username": "cli-user",
+		"Password": "cli-pass",
+		"Database": "cli-db",
 	}
 
 	cfg, err := LoadConfig(overrides)
@@ -252,11 +252,11 @@ func TestLoadConfig_PartialCLIOverrides(t *testing.T) {
 	t.Setenv("NEO4J_DATABASE", "env-db")
 
 	// Only override URI and Username, leave Password and Database from env
-	overrides := &CLIOverrides{
-		URI:      "bolt://cli-host:7687",
-		Username: "cli-user",
-		Password: "",
-		Database: "",
+	overrides := CLIOverrides{
+		"URI":      "bolt://cli-host:7687",
+		"Username": "cli-user",
+		"Password": "",
+		"Database": "",
 	}
 
 	cfg, err := LoadConfig(overrides)
@@ -525,8 +525,8 @@ func TestLoadConfig_TLS(t *testing.T) {
 		t.Setenv("NEO4J_MCP_HTTP_TLS_CERT_FILE", certPath)
 		t.Setenv("NEO4J_MCP_HTTP_TLS_KEY_FILE", keyPath)
 
-		overrides := &CLIOverrides{
-			TLSEnabled: "true",
+		overrides := CLIOverrides{
+			"HTTPTLSEnabled": "true",
 		}
 
 		cfg, err := LoadConfig(overrides)
@@ -651,8 +651,8 @@ func TestLoadConfig_DefaultHTTPPort(t *testing.T) {
 		t.Setenv("NEO4J_MCP_HTTP_TLS_KEY_FILE", keyPath)
 		// Don't set NEO4J_MCP_HTTP_PORT in environment
 
-		overrides := &CLIOverrides{
-			Port: "9443",
+		overrides := CLIOverrides{
+			"HTTPPort": "9443",
 		}
 
 		cfg, err := LoadConfig(overrides)
@@ -675,8 +675,8 @@ func TestLoadConfig_DefaultHTTPPort(t *testing.T) {
 		t.Setenv("NEO4J_MCP_HTTP_TLS_KEY_FILE", keyPath)
 		// Don't set NEO4J_MCP_HTTP_PORT
 
-		overrides := &CLIOverrides{
-			TLSEnabled: "true",
+		overrides := CLIOverrides{
+			"HTTPTLSEnabled": "true",
 		}
 
 		cfg, err := LoadConfig(overrides)
@@ -749,8 +749,8 @@ func TestLoadConfig_HTTPAllowedOrigins(t *testing.T) {
 		t.Setenv("NEO4J_PASSWORD", "password")
 		t.Setenv("NEO4J_MCP_HTTP_ALLOWED_ORIGINS", "https://env-example.com")
 
-		overrides := &CLIOverrides{
-			AllowedOrigins: "https://cli-example.com",
+		overrides := CLIOverrides{
+			"HTTPAllowedOrigins": "https://cli-example.com",
 		}
 
 		cfg, err := LoadConfig(overrides)
@@ -808,8 +808,8 @@ func TestLoadConfig_AuthHeaderName(t *testing.T) {
 		t.Setenv("NEO4J_PASSWORD", "password")
 		t.Setenv("NEO4J_HTTP_AUTH_HEADER_NAME", "X-Env-Auth")
 
-		overrides := &CLIOverrides{
-			AuthHeaderName: "X-CLI-Auth",
+		overrides := CLIOverrides{
+			"AuthHeaderName": "X-CLI-Auth",
 		}
 
 		cfg, err := LoadConfig(overrides)
@@ -829,8 +829,8 @@ func TestLoadConfig_AuthHeaderName(t *testing.T) {
 		t.Setenv("NEO4J_USERNAME", "neo4j")
 		t.Setenv("NEO4J_PASSWORD", "password")
 
-		overrides := &CLIOverrides{
-			AuthHeaderName: "   ", // non-empty but only whitespace -> should be trimmed to empty and cause an error
+		overrides := CLIOverrides{
+			"AuthHeaderName": "   ", // non-empty but only whitespace -> should be trimmed to empty and cause an error
 		}
 
 		cfg, err := LoadConfig(overrides)
@@ -897,7 +897,7 @@ func TestLoadConfig_SchemaSampleSize(t *testing.T) {
 		t.Setenv("NEO4J_PASSWORD", "password")
 		t.Setenv("NEO4J_SCHEMA_SAMPLE_SIZE", "250")
 
-		overrides := &CLIOverrides{SchemaSampleSize: "42"}
+		overrides := CLIOverrides{"SchemaSampleSize": "42"}
 		cfg, err := LoadConfig(overrides)
 		if err != nil {
 			t.Fatalf("LoadConfig() unexpected error: %v", err)
@@ -917,7 +917,7 @@ func TestLoadConfig_SchemaSampleSize(t *testing.T) {
 		t.Setenv("NEO4J_USERNAME", "neo4j")
 		t.Setenv("NEO4J_PASSWORD", "password")
 
-		overrides := &CLIOverrides{SchemaSampleSize: "not-a-number"}
+		overrides := CLIOverrides{"SchemaSampleSize": "not-a-number"}
 		cfg, err := LoadConfig(overrides)
 		if err != nil {
 			t.Fatalf("LoadConfig() unexpected error: %v", err)

@@ -34,34 +34,10 @@ func main() {
 	cli.HandleArgs(Version)
 
 	// Parse CLI flags for configuration
-	cliArgs := cli.ParseConfigFlags()
+	overrides := cli.ParseConfigFlags()
 
-	// Load and validate configuration (env vars + CLI overrides)
-	cfg, err := config.LoadConfig(&config.CLIOverrides{
-		URI:                            cliArgs.URI,
-		Username:                       cliArgs.Username,
-		Password:                       cliArgs.Password,
-		Database:                       cliArgs.Database,
-		ReadOnly:                       cliArgs.ReadOnly,
-		Telemetry:                      cliArgs.Telemetry,
-		SchemaSampleSize:               cliArgs.SchemaSampleSize,
-		CypherMaxRows:                  cliArgs.CypherMaxRows,
-		CypherMaxBytes:                 cliArgs.CypherMaxBytes,
-		CypherTimeout:                  cliArgs.CypherTimeout,
-		CypherMaxEstimatedRows:         cliArgs.CypherMaxEstimatedRows,
-		TransportMode:                  cliArgs.TransportMode,
-		Port:                           cliArgs.HTTPPort,
-		Host:                           cliArgs.HTTPHost,
-		AllowedOrigins:                 cliArgs.HTTPAllowedOrigins,
-		TLSEnabled:                     cliArgs.HTTPTLSEnabled,
-		TLSCertFile:                    cliArgs.HTTPTLSCertFile,
-		TLSKeyFile:                     cliArgs.HTTPTLSKeyFile,
-		AuthHeaderName:                 cliArgs.AuthHeaderName,
-		AllowUnauthenticatedPing:       cliArgs.HTTPAllowUnauthenticatedPing,
-		AllowUnauthenticatedToolsList:  cliArgs.HTTPAllowUnauthenticatedToolsList,
-		AllowUnauthenticatedInitialize: cliArgs.HTTPAllowUnauthenticatedInitialize,
-		AllowUnauthenticatedNotificationsInitialize: cliArgs.HTTPAllowUnauthenticatedNotificationsInitialize,
-	})
+	// Load and validate configuration (CLI flags + env vars + optional config file)
+	cfg, err := config.LoadConfig(overrides)
 	if err != nil {
 		// Can't use logger here yet, so just print to stderr
 		fmt.Fprintln(os.Stderr, "Failed to load configuration: "+err.Error())

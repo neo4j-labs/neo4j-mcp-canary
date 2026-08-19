@@ -9,12 +9,61 @@ import (
 	"os"
 	"slices"
 	"strings"
+
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 )
 
 // osExit is a variable that can be mocked in tests
 var osExit = os.Exit
 
-const helpText = `neo4j-mcp-canary - Neo4j Model Context Protocol Canary Server
+// configFileFlagName is the one CLI flag that isn't part of config.Fields():
+// it locates the config file itself, so it must exist before a file source
+// can be built.
+const configFileFlagName = "config-file"
+
+// argsSlice lists every known configuration flag, derived from
+// config.Fields() plus --config-file. HandleArgs pre-scans os.Args for these
+// so it can skip past them (and their values) before the stdlib flag package
+// parses them in ParseConfigFlags.
+var argsSlice = buildArgsSlice()
+
+func buildArgsSlice() []string {
+	names := make([]string, 0, len(config.Fields())+1)
+	for _, f := range config.Fields() {
+		if f.FlagName != "" {
+			names = append(names, "--"+f.FlagName)
+		}
+	}
+	names = append(names, "--"+configFileFlagName)
+	return names
+}
+
+// helpText is generated from config.Fields() so the CLI flags, required env
+// vars, and optional env vars documented here can never drift from what
+// ParseConfigFlags actually registers.
+var helpText = buildHelpText()
+
+func buildHelpText() string {
+	var options, required, optional strings.Builder
+
+	for _, f := range config.Fields() {
+		if f.FlagName != "" {
+			fmt.Fprintf(&options, "  --%s <%s>\n      %s (overrides environment variable %s)\n", f.FlagName, f.Placeholder, f.Description, f.EnvVar)
+		}
+		if f.Required {
+			fmt.Fprintf(&required, "  %-12s %s\n", f.EnvVar, f.Description)
+			continue
+		}
+		defaultSuffix := ""
+		if f.DefaultDisplay != "" {
+			defaultSuffix = fmt.Sprintf(" (default: %s)", f.DefaultDisplay)
+		}
+		fmt.Fprintf(&optional, "  %s %s%s\n", f.EnvVar, f.Description, defaultSuffix)
+	}
+	fmt.Fprintf(&options, "  --%s <PATH>\n      Path to an optional JSON or YAML config file, used as a lowest-priority configuration source (overrides environment variable NEO4J_CONFIG_FILE)\n", configFileFlagName)
+	fmt.Fprintf(&optional, "  NEO4J_CONFIG_FILE Path to an optional JSON or YAML config file, used as a lowest-priority configuration source\n")
+
+	return fmt.Sprintf(`neo4j-mcp-canary - Neo4j Model Context Protocol Canary Server
 
 Usage:
   neo4j-mcp-canary [OPTIONS]
@@ -22,58 +71,11 @@ Usage:
 Options:
   -h, --help                          Show this help message
   -v, --version                       Show version information
-  --neo4j-uri <URI>                   Neo4j connection URI (overrides environment variable NEO4J_URI)
-  --neo4j-username <USERNAME>         Database username (overrides environment variable NEO4J_USERNAME)
-  --neo4j-password <PASSWORD>         Database password (overrides environment variable NEO4J_PASSWORD)
-  --neo4j-database <DATABASE>         Database name (overrides environment variable NEO4J_DATABASE)
-  --neo4j-read-only <BOOLEAN>         Enable read-only mode: true or false (overrides environment variable NEO4J_READ_ONLY)
-  --neo4j-telemetry <BOOLEAN>         Enable telemetry: true or false (overrides environment variable NEO4J_TELEMETRY)
-  --neo4j-schema-sample-size <INT>    Number of nodes per label APOC samples when inferring schema (overrides environment variable NEO4J_SCHEMA_SAMPLE_SIZE)
-  --neo4j-cypher-max-rows <INT>       Per-call row cap for read-cypher and write-cypher; 0 disables (overrides environment variable NEO4J_CYPHER_MAX_ROWS)
-  --neo4j-cypher-max-bytes <INT>      Per-call byte cap for read-cypher and write-cypher; 0 disables (overrides environment variable NEO4J_CYPHER_MAX_BYTES)
-  --neo4j-cypher-timeout <INT>        Context timeout in seconds for read-cypher and write-cypher execution; 0 disables (overrides environment variable NEO4J_CYPHER_TIMEOUT)
-  --neo4j-cypher-max-estimated-rows <INT>  EXPLAIN-time estimate threshold above which read-cypher refuses the query; 0 disables (overrides environment variable NEO4J_CYPHER_MAX_ESTIMATED_ROWS)
-  --neo4j-transport-mode <MODE>       MCP Transport mode (e.g., 'stdio', 'http') (overrides environment variable NEO4J_TRANSPORT_MODE & NEO4J_MCP_TRANSPORT(deprecated))
-  --neo4j-http-port <PORT>            HTTP server port (overrides environment variable NEO4J_MCP_HTTP_PORT)
-  --neo4j-http-host <HOST>            HTTP server host (overrides environment variable NEO4J_MCP_HTTP_HOST)
-  --neo4j-http-allowed-origins <ORIGINS> Comma-separated list of allowed CORS origins (overrides environment variable NEO4J_MCP_HTTP_ALLOWED_ORIGINS)
-  --neo4j-http-tls-enabled <BOOLEAN>  Enable TLS/HTTPS for HTTP server: true or false (overrides environment variable NEO4J_MCP_HTTP_TLS_ENABLED)
-  --neo4j-http-tls-cert-file <PATH>   Path to TLS certificate file (overrides environment variable NEO4J_MCP_HTTP_TLS_CERT_FILE)
-  --neo4j-http-tls-key-file <PATH>    Path to TLS private key file (overrides environment variable NEO4J_MCP_HTTP_TLS_KEY_FILE)
-  --neo4j-http-auth-header-name <HEADER> Name of the HTTP header to read auth credentials from (overrides NEO4J_HTTP_AUTH_HEADER_NAME)
-  --neo4j-http-allow-unauthenticated-ping <BOOLEAN> Allow unauthenticated ping health checks: true or false (overrides NEO4J_HTTP_ALLOW_UNAUTHENTICATED_PING)
-  --neo4j-http-allow-unauthenticated-tools-list <BOOLEAN> Allow unauthenticated tools list: true or false (overrides NEO4J_HTTP_ALLOW_UNAUTHENTICATED_TOOLS_LIST)
-  --neo4j-http-allow-unauthenticated-initialize <BOOLEAN> Allow unauthenticated tools list: true or false (overrides NEO4J_HTTP_ALLOW_UNAUTHENTICATED_INITIALIZE)
-  --neo4j-http-allow-unauthenticated-notifications-initialize <BOOLEAN> Allow unauthenticated tools list: true or false (overrides NEO4J_HTTP_ALLOW_UNAUTHENTICATED_NOTIFICATIONS_INITIALIZE)
-
+%s
 Required Environment Variables:
-  NEO4J_URI       Neo4j database URI
-  NEO4J_USERNAME  Database username
-  NEO4J_PASSWORD  Database password
-
+%s
 Optional Environment Variables:
-  NEO4J_DATABASE  Database name (default: neo4j)
-  NEO4J_TELEMETRY Enable/disable telemetry (default: true)
-  NEO4J_READ_ONLY Enable read-only mode (default: false)
-  NEO4J_SCHEMA_SAMPLE_SIZE Number of nodes per label APOC samples when inferring schema (default: 1000)
-  NEO4J_CYPHER_MAX_ROWS Per-call row cap for read-cypher and write-cypher (default: 1000, 0 disables)
-  NEO4J_CYPHER_MAX_BYTES Per-call byte cap for read-cypher and write-cypher (default: 900000, 0 disables)
-  NEO4J_CYPHER_TIMEOUT Context timeout in seconds for read-cypher and write-cypher (default: 30, 0 disables)
-  NEO4J_CYPHER_MAX_ESTIMATED_ROWS EXPLAIN-time estimate threshold for read-cypher refusal (default: 1000000, 0 disables)
-  NEO4J_TRANSPORT_MODE MCP Transport mode (e.g., 'stdio', 'http') (default: stdio)
-  NEO4J_MCP_TRANSPORT MCP Transport mode (e.g., 'stdio', 'http') (default: stdio)
-  NEO4J_MCP_HTTP_PORT HTTP server port (default: 443 with TLS, 80 without TLS)
-  NEO4J_MCP_HTTP_HOST HTTP server host (default: 127.0.0.1)
-  NEO4J_MCP_HTTP_ALLOWED_ORIGINS Comma-separated list of allowed CORS origins (optional)
-  NEO4J_MCP_HTTP_TLS_ENABLED Enable TLS/HTTPS for HTTP server (default: false)
-  NEO4J_MCP_HTTP_TLS_CERT_FILE Path to TLS certificate file (required when TLS is enabled)
-  NEO4J_MCP_HTTP_TLS_KEY_FILE Path to TLS private key file (required when TLS is enabled)
-  NEO4J_HTTP_AUTH_HEADER_NAME Name of the HTTP header to read auth credentials from (default: Authorization)
-  NEO4J_HTTP_ALLOW_UNAUTHENTICATED_PING Allow unauthenticated ping health checks (default: true)
-  NEO4J_HTTP_ALLOW_UNAUTHENTICATED_TOOLS_LIST Allow unauthenticated tool listing (default: true)
-  NEO4J_HTTP_ALLOW_UNAUTHENTICATED_INITIALIZE Allow unauthenticated initialize (default: true)
-  NEO4J_HTTP_ALLOW_UNAUTHENTICATED_NOTIFICATIONS_INITIALIZE Allow unauthenticated notification initialize (default: true)
-
+%s
   Examples:
   # Using environment variables
   NEO4J_URI=bolt://localhost:7687 NEO4J_USERNAME=neo4j NEO4J_PASSWORD=password neo4j-mcp-canary
@@ -81,124 +83,38 @@ Optional Environment Variables:
   # Using CLI flags (takes precedence over environment variables)
   neo4j-mcp-canary --neo4j-uri bolt://localhost:7687 --neo4j-username neo4j --neo4j-password password
 
+  # Using a config file (lowest-priority source; CLI flags and env vars still override it)
+  neo4j-mcp-canary --config-file /etc/neo4j-mcp/config.yaml
+
 For more information, visit: https://github.com/neo4j-labs/neo4j-mcp-canary
-`
-
-// Args holds configuration values parsed from command-line flags
-type Args struct {
-	URI                                             string
-	Username                                        string
-	Password                                        string // #nosec G117 -- Password is only used during startup to create auth token, not logged or exposed
-	Database                                        string
-	ReadOnly                                        string
-	Telemetry                                       string
-	SchemaSampleSize                                string
-	CypherMaxRows                                   string
-	CypherMaxBytes                                  string
-	CypherTimeout                                   string
-	CypherMaxEstimatedRows                          string
-	TransportMode                                   string
-	HTTPPort                                        string
-	HTTPHost                                        string
-	HTTPAllowedOrigins                              string
-	HTTPTLSEnabled                                  string
-	HTTPTLSCertFile                                 string
-	HTTPTLSKeyFile                                  string
-	AuthHeaderName                                  string
-	HTTPAllowUnauthenticatedPing                    string
-	HTTPAllowUnauthenticatedToolsList               string
-	HTTPAllowUnauthenticatedInitialize              string
-	HTTPAllowUnauthenticatedNotificationsInitialize string
+`, options.String(), required.String(), optional.String())
 }
 
-// this is a list of known configuration flags to be skipped in HandleArgs
-// add new config flags here as needed
-var argsSlice = []string{
-	"--neo4j-uri",
-	"--neo4j-username",
-	"--neo4j-password",
-	"--neo4j-database",
-	"--neo4j-read-only",
-	"--neo4j-telemetry",
-	"--neo4j-schema-sample-size",
-	"--neo4j-cypher-max-rows",
-	"--neo4j-cypher-max-bytes",
-	"--neo4j-cypher-timeout",
-	"--neo4j-cypher-max-estimated-rows",
-	"--neo4j-transport-mode",
-	"--neo4j-http-port",
-	"--neo4j-http-host",
-	"--neo4j-http-allowed-origins",
-	"--neo4j-http-tls-enabled",
-	"--neo4j-http-tls-cert-file",
-	"--neo4j-http-tls-key-file",
-	"--neo4j-http-auth-header-name",
-	"--neo4j-http-allow-unauthenticated-ping",
-	"--neo4j-http-allow-unauthenticated-tools-list",
-	"--neo4j-http-allow-unauthenticated-initialize",
-	"--neo4j-http-allow-unauthenticated-notifications-initialize",
-}
-
-// ParseConfigFlags parses CLI flags and returns configuration values.
-// It should be called after HandleArgs to ensure help/version flags are processed first.
-func ParseConfigFlags() *Args {
-	neo4jURI := flag.String("neo4j-uri", "", "Neo4j connection URI (overrides NEO4J_URI env var)")
-	neo4jUsername := flag.String("neo4j-username", "", "Neo4j username (overrides NEO4J_USERNAME env var)")
-	neo4jPassword := flag.String("neo4j-password", "", "Neo4j password (overrides NEO4J_PASSWORD env var)")
-	neo4jDatabase := flag.String("neo4j-database", "", "Neo4j database name (overrides NEO4J_DATABASE env var)")
-	neo4jReadOnly := flag.String("neo4j-read-only", "", "Enable read-only mode: true or false (overrides NEO4J_READ_ONLY env var)")
-	neo4jTelemetry := flag.String("neo4j-telemetry", "", "Enable telemetry: true or false (overrides NEO4J_TELEMETRY env var)")
-	neo4jSchemaSampleSize := flag.String("neo4j-schema-sample-size", "", "Number of nodes per label APOC samples when inferring schema (overrides NEO4J_SCHEMA_SAMPLE_SIZE env var)")
-	// Cypher operational controls — one string flag per knob. They're parsed as
-	// strings here (not int) because config.LoadConfig already handles the
-	// string→int32 parsing via ParseInt32 for CLI and env values alike, and
-	// keeping the flag type consistent with the other CLI flags here makes the
-	// CLIOverrides struct uniformly typed. 0 disables each cap individually
-	// (see the constants in internal/config/config.go).
-	neo4jCypherMaxRows := flag.String("neo4j-cypher-max-rows", "", "Per-call row cap for read-cypher and write-cypher (overrides NEO4J_CYPHER_MAX_ROWS env var)")
-	neo4jCypherMaxBytes := flag.String("neo4j-cypher-max-bytes", "", "Per-call byte cap for read-cypher and write-cypher (overrides NEO4J_CYPHER_MAX_BYTES env var)")
-	neo4jCypherTimeout := flag.String("neo4j-cypher-timeout", "", "Context timeout in seconds for read-cypher and write-cypher (overrides NEO4J_CYPHER_TIMEOUT env var)")
-	neo4jCypherMaxEstimatedRows := flag.String("neo4j-cypher-max-estimated-rows", "", "EXPLAIN-time estimate threshold for read-cypher refusal (overrides NEO4J_CYPHER_MAX_ESTIMATED_ROWS env var)")
-	neo4jTransportMode := flag.String("neo4j-transport-mode", "", "MCP Transport mode (e.g., 'stdio', 'http') (overrides NEO4J_TRANSPORT_MODE env var)")
-	neo4jHTTPPort := flag.String("neo4j-http-port", "", "HTTP server port (overrides NEO4J_MCP_HTTP_PORT env var)")
-	neo4jHTTPHost := flag.String("neo4j-http-host", "", "HTTP server host (overrides NEO4J_MCP_HTTP_HOST env var)")
-	neo4jHTTPAllowedOrigins := flag.String("neo4j-http-allowed-origins", "", "Comma-separated list of allowed CORS origins (overrides NEO4J_MCP_HTTP_ALLOWED_ORIGINS env var)")
-	neo4jHTTPTLSEnabled := flag.String("neo4j-http-tls-enabled", "", "Enable TLS/HTTPS for HTTP server: true or false (overrides NEO4J_MCP_HTTP_TLS_ENABLED env var)")
-	neo4jHTTPTLSCertFile := flag.String("neo4j-http-tls-cert-file", "", "Path to TLS certificate file (overrides NEO4J_MCP_HTTP_TLS_CERT_FILE env var)")
-	neo4jHTTPTLSKeyFile := flag.String("neo4j-http-tls-key-file", "", "Path to TLS private key file (overrides NEO4J_MCP_HTTP_TLS_KEY_FILE env var)")
-	neo4jAuthHeaderName := flag.String("neo4j-http-auth-header-name", "", "Name of the HTTP header to read auth credentials from (overrides NEO4J_HTTP_AUTH_HEADER_NAME env var)")
-	neo4jHTTPAllowUnauthenticatedPing := flag.String("neo4j-http-allow-unauthenticated-ping", "", "Allow unauthenticated ping health checks: true or false (overrides NEO4J_HTTP_ALLOW_UNAUTHENTICATED_PING env var)")
-	neo4jHTTPAllowUnauthenticatedToolsList := flag.String("neo4j-http-allow-unauthenticated-tools-list", "", "Allow unauthenticated tools listing: true or false (overrides NEO4J_HTTP_ALLOW_UNAUTHENTICATED_TOOLS_LIST env var)")
-	neo4jHTTPAllowUnauthenticatedInitialize := flag.String("neo4j-http-allow-unauthenticated-initialize", "", "Allow unauthenticated tools listing: true or false (overrides NEO4J_HTTP_ALLOW_UNAUTHENTICATED_INITIALIZE env var)")
-	neo4jHTTPAllowUnauthenticatedNotificationsInitialize := flag.String("neo4j-http-allow-unauthenticated-notifications-initialize", "", "Allow unauthenticated tools listing: true or false (overrides NEO4J_HTTP_ALLOW_UNAUTHENTICATED_NOTIFICATION_INITIALIZE env var)")
+// ParseConfigFlags parses CLI flags and returns configuration overrides
+// ready to pass to config.LoadConfig. It should be called after HandleArgs
+// to ensure help/version flags are processed first.
+func ParseConfigFlags() config.CLIOverrides {
+	flagValues := make(map[string]*string, len(config.Fields()))
+	for _, f := range config.Fields() {
+		if f.FlagName == "" {
+			continue
+		}
+		flagValues[f.Name] = flag.String(f.FlagName, "", fmt.Sprintf("%s (overrides %s env var)", f.Description, f.EnvVar))
+	}
+	configFile := flag.String(configFileFlagName, "", "Path to an optional JSON or YAML config file (overrides NEO4J_CONFIG_FILE env var)")
 
 	flag.Parse()
 
-	return &Args{
-		URI:                                *neo4jURI,
-		Username:                           *neo4jUsername,
-		Password:                           *neo4jPassword,
-		Database:                           *neo4jDatabase,
-		ReadOnly:                           *neo4jReadOnly,
-		Telemetry:                          *neo4jTelemetry,
-		SchemaSampleSize:                   *neo4jSchemaSampleSize,
-		CypherMaxRows:                      *neo4jCypherMaxRows,
-		CypherMaxBytes:                     *neo4jCypherMaxBytes,
-		CypherTimeout:                      *neo4jCypherTimeout,
-		CypherMaxEstimatedRows:             *neo4jCypherMaxEstimatedRows,
-		TransportMode:                      *neo4jTransportMode,
-		HTTPPort:                           *neo4jHTTPPort,
-		HTTPHost:                           *neo4jHTTPHost,
-		HTTPAllowedOrigins:                 *neo4jHTTPAllowedOrigins,
-		HTTPTLSEnabled:                     *neo4jHTTPTLSEnabled,
-		HTTPTLSCertFile:                    *neo4jHTTPTLSCertFile,
-		HTTPTLSKeyFile:                     *neo4jHTTPTLSKeyFile,
-		HTTPAllowUnauthenticatedPing:       *neo4jHTTPAllowUnauthenticatedPing,
-		HTTPAllowUnauthenticatedToolsList:  *neo4jHTTPAllowUnauthenticatedToolsList,
-		HTTPAllowUnauthenticatedInitialize: *neo4jHTTPAllowUnauthenticatedInitialize,
-		HTTPAllowUnauthenticatedNotificationsInitialize: *neo4jHTTPAllowUnauthenticatedNotificationsInitialize,
-		AuthHeaderName: *neo4jAuthHeaderName,
+	overrides := config.CLIOverrides{}
+	for name, value := range flagValues {
+		if *value != "" {
+			overrides[name] = *value
+		}
 	}
+	if *configFile != "" {
+		overrides["ConfigFile"] = *configFile
+	}
+	return overrides
 }
 
 // HandleArgs processes command-line arguments for version and help flags.
