@@ -36,7 +36,7 @@ In STDIO mode, the server verifies the following. If any check fails (e.g. inval
 - The presence of the APOC plugin.
 
 **HTTP Mode — Verification Skipped**
-In HTTP mode, startup verification checks are skipped because credentials come from per-request auth headers. The server starts immediately without connecting to Neo4j.
+In HTTP mode, startup verification checks are skipped because credentials come from per-request auth headers. The server starts immediately without connecting to Neo4j. The one exception is [Query API mode](#connecting-via-the-query-api-instead-of-bolt): its minimum-version check runs at startup in both transport modes, since it only needs an unauthenticated GET and doesn't depend on per-request credentials.
 
 **Optional Requirements**
 If an optional dependency is missing, the server starts in adaptive mode. For instance, if the Graph Data Science (GDS) library is not detected, the server still launches but automatically disables GDS-dependent tools such as `list-gds-procedures`. All other tools remain available.
@@ -161,6 +161,31 @@ Core connection and behaviour:
 | `NEO4J_LOG_LEVEL`                 | `info`    | `debug`, `info`, `notice`, `warning`, `error`, `critical`, `alert`, `emergency` |
 | `NEO4J_LOG_FORMAT`                | `text`    | `text` or `json`                                                         |
 | `NEO4J_TRANSPORT_MODE`            | `stdio`   | `stdio` or `http` (supersedes the deprecated `NEO4J_MCP_TRANSPORT`)      |
+
+#### Connecting via the Query API instead of Bolt
+
+`NEO4J_URI`'s scheme determines which wire protocol the server uses to talk
+to Neo4j — no separate flag is needed:
+
+- `bolt://`, `bolt+s://`, `neo4j://`, `neo4j+s://`, etc. → the Bolt driver (default, unchanged behaviour).
+- `http://` or `https://` → the [Neo4j Query API](https://neo4j.com/docs/query-api/current/), Neo4j's HTTP-based query interface. Useful for deployments that only expose HTTP or otherwise prefer not to use Bolt.
+
+Query API mode requires Neo4j **2026.07** or newer (calendar-versioned
+releases) or **5.27-aura** or newer (classic-versioned Aura releases only —
+a bare classic version with no `-aura` suffix is not supported). This floor
+is one release past the Query API's own general availability (2026.06):
+read-cypher's write-query rejection depends on the `queryType` field in the
+query response, which Neo4j only introduced in 2026.07 — a 2026.06 server
+has no reliable signal to classify a query as read-only before running it.
+The server checks the connected instance's reported version against this
+floor at startup (via an unauthenticated GET to the base URI) and refuses
+to start if it's too old, with an error naming the version it found and the
+minimum required.
+
+`NEO4J_USERNAME`/`NEO4J_PASSWORD` and per-request Basic/Bearer credentials
+work the same way in Query API mode as they do for Bolt — see
+[Transport Modes](#transport-modes) and
+[Authentication Methods (HTTP Mode)](#authentication-methods-http-mode).
 
 Cypher execution safeguards (see [Cypher Execution Safeguards](#cypher-execution-safeguards)):
 

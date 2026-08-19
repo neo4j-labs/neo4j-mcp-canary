@@ -73,10 +73,22 @@ func (s *Neo4jService) buildQueryOptions(ctx context.Context, baseOptions ...neo
 }
 
 // VerifyConnectivity checks the driver can establish a valid connection with a Neo4j instance;
-// This is done by running a harmless test query against whatever database has been specified ( if any )
+// This is done by running a harmless test query against whatever database has been specified ( if any ).
+// It delegates to VerifyConnectivityWith, which holds no Neo4jService-specific
+// state — kept as a method here only so existing callers of the
+// database.Helpers interface are unaffected.
 func (s *Neo4jService) VerifyConnectivity(ctx context.Context) error {
+	return VerifyConnectivityWith(ctx, s)
+}
+
+// VerifyConnectivityWith runs a harmless "RETURN 1" test query through the
+// given QueryExecutor and checks the response shape. This is a free function
+// (not tied to any transport) so that other database.Service implementations
+// — for example the Query API-backed service in internal/queryapi — can
+// reuse it instead of duplicating the check.
+func VerifyConnectivityWith(ctx context.Context, executor QueryExecutor) error {
 	// Run a harmless test query
-	records, err := s.ExecuteReadQuery(ctx, "RETURN 1 as first", map[string]any{})
+	records, err := executor.ExecuteReadQuery(ctx, "RETURN 1 as first", map[string]any{})
 	if err != nil {
 		return fmt.Errorf("impossible to verify connectivity with the Neo4j instance: %w", err)
 	}
@@ -165,7 +177,7 @@ func (s *Neo4jService) GetQueryType(ctx context.Context, cypher string, params m
 	// Known limitation: a "CYPHER <options> PROFILE ..." preamble bypasses this check
 	// (the first keyword seen is "CYPHER"). That path still produces the raw driver
 	// error, but the common case — a bare PROFILE — is now handled cleanly.
-	switch firstKeyword(cypher) {
+	switch FirstKeyword(cypher) {
 	case "PROFILE":
 		return neo4j.QueryTypeWriteOnly, nil
 	case "EXPLAIN":
@@ -211,7 +223,7 @@ func (s *Neo4jService) EstimateRowCount(ctx context.Context, cypher string, para
 	// reach this path for PROFILE. EXPLAIN queries classified as ReadOnly can
 	// and do land here — they're legitimately cheap to run (no execution at all)
 	// so skipping the guard is the right call anyway.
-	switch firstKeyword(cypher) {
+	switch FirstKeyword(cypher) {
 	case "EXPLAIN", "PROFILE":
 		return 0, nil
 	}
@@ -242,10 +254,10 @@ func (s *Neo4jService) EstimateRowCount(ctx context.Context, cypher string, para
 		// didn't fail) so there's nothing to gate on.
 		return 0, nil
 	}
-	return extractEstimatedRows(plan.Arguments()), nil
+	return ExtractEstimatedRows(plan.Arguments()), nil
 }
 
-// extractEstimatedRows pulls the root operator's EstimatedRows out of the plan
+// ExtractEstimatedRows pulls the root operator's EstimatedRows out of the plan
 // Arguments map. The Arguments map is populated by the driver from the server's
 // Bolt-level plan representation, where numeric values may arrive as float64
 // (JSON-style) or int64 (Bolt integer) depending on server version and plan type.
@@ -254,7 +266,7 @@ func (s *Neo4jService) EstimateRowCount(ctx context.Context, cypher string, para
 //
 // A missing EstimatedRows key returns 0 — which the caller interprets as "no
 // estimate available, skip the guard". Same contract as plan == nil.
-func extractEstimatedRows(args map[string]any) int64 {
+func ExtractEstimatedRows(args map[string]any) int64 {
 	if args == nil {
 		return 0
 	}
@@ -282,7 +294,7 @@ func extractEstimatedRows(args map[string]any) int64 {
 	return 0
 }
 
-// firstKeyword returns the first Cypher keyword in the query, uppercased. Leading
+// FirstKeyword returns the first Cypher keyword in the query, uppercased. Leading
 // whitespace and comments (both /* ... */ block comments and // ... line comments)
 // are stripped before the first token is taken. Returns the empty string for an
 // input that is empty or entirely whitespace/comments.
@@ -291,8 +303,8 @@ func extractEstimatedRows(args map[string]any) int64 {
 // only used as a pre-flight check to detect the two leading verbs (PROFILE and
 // EXPLAIN) that interact badly with the EXPLAIN-wrap classifier. Anything more
 // sophisticated than "what's the first word" should go through the planner.
-func firstKeyword(query string) string {
-	s := stripLeadingWhitespaceAndComments(query)
+func FirstKeyword(query string) string {
+	s := StripLeadingWhitespaceAndComments(query)
 	end := strings.IndexFunc(s, unicode.IsSpace)
 	if end < 0 {
 		end = len(s)
@@ -300,14 +312,14 @@ func firstKeyword(query string) string {
 	return strings.ToUpper(s[:end])
 }
 
-// stripLeadingWhitespaceAndComments removes leading whitespace and any number of
+// StripLeadingWhitespaceAndComments removes leading whitespace and any number of
 // leading /* ... */ or // ... comments from the query. It stops at the first
 // non-whitespace, non-comment byte.
 //
 // A malformed block comment with no closing "*/" is returned as-is on the
 // principle that the downstream parser will produce a better error message for
 // it than this function could.
-func stripLeadingWhitespaceAndComments(query string) string {
+func StripLeadingWhitespaceAndComments(query string) string {
 	for {
 		query = strings.TrimLeftFunc(query, unicode.IsSpace)
 		if strings.HasPrefix(query, "/*") {
@@ -532,13 +544,26 @@ func (s *Neo4jService) executeStreaming(ctx context.Context, cypher string, para
 	return result, nil
 }
 
-// Neo4jRecordsToJSON converts Neo4j records to JSON string. Each record's
+// Neo4jRecordsToJSON converts Neo4j records to JSON string. It delegates to
+// FormatRecordsAsJSON, which holds no Neo4jService-specific state — kept as
+// a method here only so existing callers of the RecordFormatter interface
+// are unaffected. See FormatRecordsAsJSON for the implementation.
+func (s *Neo4jService) Neo4jRecordsToJSON(records []*neo4j.Record) (string, error) {
+	return FormatRecordsAsJSON(records)
+}
+
+// FormatRecordsAsJSON converts Neo4j records to a JSON string. Each record's
 // AsMap() output is run through convertMapToTagged first so driver types
 // (dbtype.Node, dbtype.Date, dbtype.Duration, etc.) emerge as the MCP-facing
 // camelCase shapes rather than as PascalCase Go struct reflections. See
 // json_tagged_values.go for the full conversion contract and the per-type
 // rationale.
-func (s *Neo4jService) Neo4jRecordsToJSON(records []*neo4j.Record) (string, error) {
+//
+// This is a free function (not tied to any transport) so that other
+// database.Service implementations — for example the Query API-backed
+// service in internal/queryapi — can reuse it once they've adapted their
+// own records into []*neo4j.Record, instead of duplicating this file.
+func FormatRecordsAsJSON(records []*neo4j.Record) (string, error) {
 	results := make([]map[string]any, 0)
 	for _, record := range records {
 		results = append(results, convertMapToTagged(record.AsMap()))
@@ -587,10 +612,22 @@ type cypherResponse struct {
 }
 
 // QueryResultToJSON renders a streaming QueryResult as a cypherResponse JSON
-// document. A nil input is treated as an error rather than an empty envelope,
-// because the only way to reach this function with nil is a handler bug we want
-// to catch in tests rather than paper over.
+// document. It delegates to FormatQueryResultAsJSON, which holds no
+// Neo4jService-specific state — kept as a method here only so existing
+// callers of the RecordFormatter interface are unaffected.
 func (s *Neo4jService) QueryResultToJSON(result *QueryResult) (string, error) {
+	return FormatQueryResultAsJSON(result)
+}
+
+// FormatQueryResultAsJSON renders a streaming QueryResult as a
+// cypherResponse JSON document. A nil input is treated as an error rather
+// than an empty envelope, because the only way to reach this function with
+// nil is a handler bug we want to catch in tests rather than paper over.
+//
+// This is a free function (not tied to any transport) so that other
+// database.Service implementations can reuse it — see FormatRecordsAsJSON
+// for the same reasoning.
+func FormatQueryResultAsJSON(result *QueryResult) (string, error) {
 	if result == nil {
 		err := fmt.Errorf("failed to format query result as JSON: result is nil")
 		slog.Error("Error in QueryResultToJSON", "error", err)
