@@ -73,6 +73,39 @@ export NEO4J_MCP_HTTP_ALLOWED_ORIGINS="*" # Default: empty (no CORS)
 
 **Note:** Make sure your local Neo4j instance is running with the correct credentials before testing.
 
+### CLI Flags and Config File (Alternatives to Environment Variables)
+
+Every environment variable above can also be set via a `--neo4j-*` CLI flag (run `go run ./cmd/neo4j-mcp --help` for the full list) or via an optional JSON/YAML config file passed with `--config-file` / `NEO4J_CONFIG_FILE`. Precedence is **CLI flags > environment variables > config file > built-in defaults**.
+
+The config file is often the most convenient option for local development, since it avoids re-exporting variables in every new shell:
+
+```yaml
+# dev-config.yaml (gitignored — do not commit real credentials)
+neo4j_uri: bolt://localhost:7687
+neo4j_username: neo4j
+neo4j_password: password
+neo4j_log_level: debug
+```
+
+```bash
+go run ./cmd/neo4j-mcp --config-file dev-config.yaml
+```
+
+File keys are the lower-cased form of the corresponding environment variable name. Only scalar values are supported — see [README.md's Configuration File section](README.md#configuration-file) for details.
+
+### Adding or Changing a Configuration Parameter
+
+All configuration — env var name, CLI flag, config-file key, default value, and validation — is declared in one place: the `fields` slice in [`internal/config/schema.go`](internal/config/schema.go). To add a new parameter:
+
+1. Add a field to the `Config` struct in `internal/config/config.go`.
+2. Add a matching `Field{...}` entry to `fields` in `internal/config/schema.go`, with a `Setter` that parses the resolved raw string (from whichever source won) onto your new `Config` field.
+
+That's it — `internal/cli/args.go` (CLI flag registration, `--help` text, and the known-flags list) and `cmd/neo4j-mcp/main.go` all derive from `config.Fields()` automatically; none of them need to change.
+
+`internal/config/schema_test.go`'s `TestFields_MatchConfigStruct` fails the build if a `Config` struct field has no matching schema entry (or vice versa) — this is the exact mistake that used to let a CLI flag silently do nothing, so don't skip running tests after adding a parameter.
+
+If your parameter's default depends on another field's resolved value (like `HTTPPort` depending on `HTTPTLSEnabled`) or needs cross-field validation (like `AuthHeaderName`'s empty-after-trim check), don't try to force it into the declarative `Field`/`Setter` shape — add it as an explicit post-processing step in `internal/config/load.go` instead, right after the per-field resolution loop.
+
 ## Build / Test / Run
 
 ```bash

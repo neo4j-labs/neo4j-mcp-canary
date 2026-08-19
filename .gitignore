@@ -27,6 +27,12 @@ go.work.sum
 # env file
 .env
 
+# local config files (see CONTRIBUTING.md's --config-file section) — these
+# commonly hold real credentials, so they're ignored by default
+dev-config.yaml
+dev-config.yml
+dev-config.json
+
 # Editor/IDE
 .idea/
 .vscode/
