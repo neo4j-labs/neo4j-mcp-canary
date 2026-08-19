@@ -1,0 +1,3 @@
+kind: Added
+body: Include the active NEO4J_OUTPUT_FORMAT (json or toon) as an output_format property on the TOOL_USED Mixpanel event.
+time: 2026-08-19T18:26:18.421153+01:00
