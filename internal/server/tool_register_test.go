@@ -22,7 +22,7 @@ func TestToolRegister(t *testing.T) {
 	aService := analytics.NewMockService(ctrl)
 	aService.EXPECT().IsEnabled().AnyTimes().Return(true)
 	aService.EXPECT().EmitEvent(gomock.Any()).AnyTimes()
-	aService.EXPECT().NewStartupEvent(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	aService.EXPECT().NewStartupEvent(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 	aService.EXPECT().NewConnectionInitializedEvent(gomock.Any()).AnyTimes()
 
 	t.Run("verifies expected tools are registered", func(t *testing.T) {
@@ -39,8 +39,8 @@ func TestToolRegister(t *testing.T) {
 
 		// Expected tools that should be registered
 		// update this number when a tool is added or removed.
-		// Current tools: get-schema, read-cypher, write-cypher, list-gds-procedures
-		expectedTotalToolsCount := 4
+		// Current tools: get-schema, read-cypher, write-cypher, list-gds-procedures, give-feedback
+		expectedTotalToolsCount := 5
 
 		err := s.Start()
 		if err != nil {
@@ -68,8 +68,8 @@ func TestToolRegister(t *testing.T) {
 
 		// Expected tools that should be registered
 		// update this number when a tool is added or removed.
-		// Readonly tools: get-schema, read-cypher, list-gds-procedures
-		expectedTotalToolsCount := 3
+		// Readonly tools: get-schema, read-cypher, list-gds-procedures, give-feedback
+		expectedTotalToolsCount := 4
 
 		err := s.Start()
 		if err != nil {
@@ -97,8 +97,8 @@ func TestToolRegister(t *testing.T) {
 
 		// Expected tools that should be registered
 		// update this number when a tool is added or removed.
-		// All tools: get-schema, read-cypher, write-cypher, list-gds-procedures
-		expectedTotalToolsCount := 4
+		// All tools: get-schema, read-cypher, write-cypher, list-gds-procedures, give-feedback
+		expectedTotalToolsCount := 5
 
 		err := s.Start()
 		if err != nil {
@@ -126,8 +126,8 @@ func TestToolRegister(t *testing.T) {
 
 		// Expected tools that should be registered
 		// update this number when a tool is added or removed.
-		// Non-GDS tools: get-schema, read-cypher, write-cypher
-		expectedTotalToolsCount := 3
+		// Non-GDS tools: get-schema, read-cypher, write-cypher, give-feedback
+		expectedTotalToolsCount := 4
 
 		err := s.Start()
 		if err != nil {

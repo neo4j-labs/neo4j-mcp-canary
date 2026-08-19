@@ -36,9 +36,14 @@ type baseProperties struct {
 // serverStartupProperties contains server-level information available at startup (no DB query required)
 type serverStartupProperties struct {
 	baseProperties
-	McpVersion    string               `json:"mcp_version"`
-	TransportMode config.TransportMode `json:"transport_mode"`
-	TLSEnabled    *bool                `json:"tls_enabled,omitempty"` // Only for HTTP mode, pointer allows explicit false
+	McpVersion string `json:"mcp_version"`
+	// ConnectionMode is "bolt" or "query_api", derived from the scheme of
+	// NEO4J_URI (see queryapi.DetectMode) — which wire protocol the server
+	// uses to talk to Neo4j. Unlike TransportMode (the MCP client-facing
+	// transport), this is about the Neo4j-facing connection.
+	ConnectionMode string               `json:"connection_mode"`
+	TransportMode  config.TransportMode `json:"transport_mode"`
+	TLSEnabled     *bool                `json:"tls_enabled,omitempty"` // Only for HTTP mode, pointer allows explicit false
 }
 
 // connectionInitializedProperties contains Neo4j-specific information (requires DB query)
@@ -53,6 +58,15 @@ type connectionInitializedProperties struct {
 type unauthenticatedJSONRPCProperties struct {
 	baseProperties
 	JSONRPCMethod string `json:"method"`
+}
+
+// feedbackProperties carries free-text feedback about the MCP server itself,
+// submitted via the give-feedback tool. The 300-character cap is enforced by
+// the tool's input schema and its handler, not here — by the time this
+// struct is built, feedback is already known to be within limits.
+type feedbackProperties struct {
+	baseProperties
+	Feedback string `json:"feedback"`
 }
 
 // ToolVectorInfo carries optional vector and index-related properties for tool events.
@@ -113,10 +127,11 @@ type ConnectionEventInfo struct {
 }
 
 // NewStartupEvent creates a server startup event with information available immediately (no DB query)
-func (a *Analytics) NewStartupEvent(transportMode config.TransportMode, tlsEnabled bool, mcpVersion string) TrackEvent {
+func (a *Analytics) NewStartupEvent(transportMode config.TransportMode, tlsEnabled bool, mcpVersion string, connectionMode string) TrackEvent {
 	props := serverStartupProperties{
 		baseProperties: a.getBaseProperties(),
 		McpVersion:     mcpVersion,
+		ConnectionMode: connectionMode,
 		TransportMode:  transportMode,
 	}
 
@@ -349,6 +364,19 @@ func (a *Analytics) NewUnauthenticatedJSONRPCEvent(jsonrpc string) TrackEvent {
 		Properties: unauthenticatedJSONRPCProperties{
 			baseProperties: a.getBaseProperties(),
 			JSONRPCMethod:  strings.ToUpper(jsonrpc),
+		},
+	}
+}
+
+// NewFeedbackEvent creates a feedback event from the give-feedback tool,
+// carrying free-text feedback (positive or negative) about the MCP server
+// itself, submitted by an agent/LLM on behalf of the user.
+func (a *Analytics) NewFeedbackEvent(feedback string) TrackEvent {
+	return TrackEvent{
+		Event: strings.Join([]string{eventNamePrefix, "FEEDBACK"}, "_"),
+		Properties: feedbackProperties{
+			baseProperties: a.getBaseProperties(),
+			Feedback:       feedback,
 		},
 	}
 }

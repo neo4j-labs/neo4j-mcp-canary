@@ -36,7 +36,7 @@ In STDIO mode, the server verifies the following. If any check fails (e.g. inval
 - The presence of the APOC plugin.
 
 **HTTP Mode — Verification Skipped**
-In HTTP mode, startup verification checks are skipped because credentials come from per-request auth headers. The server starts immediately without connecting to Neo4j.
+In HTTP mode, startup verification checks are skipped because credentials come from per-request auth headers. The server starts immediately without connecting to Neo4j. The one exception is [Query API mode](#connecting-via-the-query-api-instead-of-bolt): its minimum-version check runs at startup in both transport modes, since it only needs an unauthenticated GET and doesn't depend on per-request credentials.
 
 **Optional Requirements**
 If an optional dependency is missing, the server starts in adaptive mode. For instance, if the Graph Data Science (GDS) library is not detected, the server still launches but automatically disables GDS-dependent tools such as `list-gds-procedures`. All other tools remain available.
@@ -70,6 +70,51 @@ neo4j-mcp-canary -v
 ```
 
 Should print the installed version.
+
+## Building from Source
+
+Requires Go 1.25.3+ (see `go.mod`).
+
+Build for your current platform with [Task](https://taskfile.dev):
+
+```bash
+task build
+```
+
+This produces `bin/neo4j-mcp-canary`. Without Task, the equivalent is:
+
+```bash
+go build -C cmd/neo4j-mcp -o ../../bin/
+```
+
+### Cross-compiling for macOS / Linux
+
+Cross-compile by setting `GOOS`/`GOARCH` and disabling cgo (the codebase is
+pure Go, so `CGO_ENABLED=0` produces a fully static binary with no runtime
+dependencies on the target machine):
+
+```bash
+CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -C cmd/neo4j-mcp -o ../../dist/neo4j-mcp-canary_darwin_amd64
+CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -C cmd/neo4j-mcp -o ../../dist/neo4j-mcp-canary_darwin_arm64
+CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -C cmd/neo4j-mcp -o ../../dist/neo4j-mcp-canary_linux_amd64
+CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -C cmd/neo4j-mcp -o ../../dist/neo4j-mcp-canary_linux_arm64
+```
+
+To stamp a version into the binary (`-v` / `--version`), pass an `ldflags`
+override — this is what the release pipeline does for tagged builds:
+
+```bash
+go build -C cmd/neo4j-mcp -o ../../dist/neo4j-mcp-canary \
+  -ldflags "-X 'main.Version=$(git rev-parse --short HEAD)'"
+```
+
+Without it, `Version` defaults to `"development"`, which also disables
+telemetry regardless of `NEO4J_TELEMETRY` (see [Telemetry](#telemetry)).
+
+Official multi-platform release archives (including Windows) are built by
+[GoReleaser](https://goreleaser.com/) per `.goreleaser.yaml` — see
+[Installation (Binary)](#installation-binary) to download those instead of
+building locally.
 
 ## Transport Modes
 
@@ -161,6 +206,31 @@ Core connection and behaviour:
 | `NEO4J_LOG_LEVEL`                 | `info`    | `debug`, `info`, `notice`, `warning`, `error`, `critical`, `alert`, `emergency` |
 | `NEO4J_LOG_FORMAT`                | `text`    | `text` or `json`                                                         |
 | `NEO4J_TRANSPORT_MODE`            | `stdio`   | `stdio` or `http` (supersedes the deprecated `NEO4J_MCP_TRANSPORT`)      |
+
+#### Connecting via the Query API instead of Bolt
+
+`NEO4J_URI`'s scheme determines which wire protocol the server uses to talk
+to Neo4j — no separate flag is needed:
+
+- `bolt://`, `bolt+s://`, `neo4j://`, `neo4j+s://`, etc. → the Bolt driver (default, unchanged behaviour).
+- `http://` or `https://` → the [Neo4j Query API](https://neo4j.com/docs/query-api/current/), Neo4j's HTTP-based query interface. Useful for deployments that only expose HTTP or otherwise prefer not to use Bolt.
+
+Query API mode requires Neo4j **2026.07** or newer (calendar-versioned
+releases) or **5.27-aura** or newer (classic-versioned Aura releases only —
+a bare classic version with no `-aura` suffix is not supported). This floor
+is one release past the Query API's own general availability (2026.06):
+read-cypher's write-query rejection depends on the `queryType` field in the
+query response, which Neo4j only introduced in 2026.07 — a 2026.06 server
+has no reliable signal to classify a query as read-only before running it.
+The server checks the connected instance's reported version against this
+floor at startup (via an unauthenticated GET to the base URI) and refuses
+to start if it's too old, with an error naming the version it found and the
+minimum required.
+
+`NEO4J_USERNAME`/`NEO4J_PASSWORD` and per-request Basic/Bearer credentials
+work the same way in Query API mode as they do for Bolt — see
+[Transport Modes](#transport-modes) and
+[Authentication Methods (HTTP Mode)](#authentication-methods-http-mode).
 
 Cypher execution safeguards (see [Cypher Execution Safeguards](#cypher-execution-safeguards)):
 
@@ -318,6 +388,7 @@ Provided tools:
 | `read-cypher`         | `true`   | Execute arbitrary read-only Cypher                   | Rejects writes, schema/admin DDL, `EXPLAIN`, and `PROFILE`. See [Cypher Execution Safeguards](#cypher-execution-safeguards).   |
 | `write-cypher`        | `false`  | Execute arbitrary Cypher (write mode)                | **Caution:** LLM-generated queries can cause harm. Use only in development environments. Not registered when `NEO4J_READ_ONLY=true`. |
 | `list-gds-procedures` | `true`   | List GDS procedures available in the Neo4j instance  | Disabled automatically if GDS is not installed.                                                                                |
+| `give-feedback`       | `true`   | Submit free-text feedback about the MCP server itself | For feedback on the server (tools, behaviour, docs), not on Cypher/database issues. Limited to 300 characters. See [Feedback](#feedback). |
 
 ### Read-only mode flag
 
@@ -359,6 +430,12 @@ Driver types are wrapped in camelCase JSON shapes matching Cypher conventions:
 - **Date / Time / DateTime / LocalTime / LocalDateTime / Duration:** ISO 8601 strings
 
 Deprecated numeric `id` / `startId` / `endId` identifiers are **not** surfaced — `elementId` / `startElementId` / `endElementId` are the only identifiers returned.
+
+### Feedback
+
+`give-feedback` lets an agent submit free-text feedback about the MCP server itself — positive or negative — as a single `feedback` string argument, capped at 300 characters (enforced both in the advertised tool schema and by the handler, in case a client doesn't validate the schema before sending). It's for feedback on the server's tools, behaviour, or documentation, not for reporting Cypher/database errors.
+
+Feedback is sent as a Mixpanel event alongside the server's other telemetry, so it is only recorded when telemetry is enabled (see [Telemetry](#telemetry)) — the tool call itself always succeeds either way.
 
 ## Usage Guidance
 

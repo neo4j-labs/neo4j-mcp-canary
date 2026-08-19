@@ -1,0 +1,2 @@
+kind: Added
+body: "The MCP_STARTUP telemetry event now includes a connection_mode property (\"bolt\" or \"query_api\") indicating which wire protocol the server is using to talk to Neo4j, derived from the scheme of NEO4J_URI. This lets us distinguish Query API adoption from Bolt in the startup event, alongside the existing transport_mode property (which describes the MCP client-facing transport, not the Neo4j connection)."

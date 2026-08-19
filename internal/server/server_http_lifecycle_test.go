@@ -72,7 +72,7 @@ func TestNeo4jMCPServerHTTPMode(t *testing.T) {
 
 	analyticsService := analytics.NewMockService(ctrl)
 	analyticsService.EXPECT().EmitEvent(gomock.Any()).AnyTimes()
-	analyticsService.EXPECT().NewStartupEvent(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	analyticsService.EXPECT().NewStartupEvent(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 	analyticsService.EXPECT().IsEnabled().AnyTimes().Return(true)
 	analyticsService.EXPECT().NewConnectionInitializedEvent(gomock.Any()).AnyTimes()
 

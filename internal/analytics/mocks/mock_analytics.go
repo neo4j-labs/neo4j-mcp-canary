@@ -227,6 +227,44 @@ func (c *MockServiceNewConnectionInitializedEventCall) DoAndReturn(f func(analyt
 	return c
 }
 
+// NewFeedbackEvent mocks base method.
+func (m *MockService) NewFeedbackEvent(feedback string) analytics.TrackEvent {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NewFeedbackEvent", feedback)
+	ret0, _ := ret[0].(analytics.TrackEvent)
+	return ret0
+}
+
+// NewFeedbackEvent indicates an expected call of NewFeedbackEvent.
+func (mr *MockServiceMockRecorder) NewFeedbackEvent(feedback any) *MockServiceNewFeedbackEventCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewFeedbackEvent", reflect.TypeOf((*MockService)(nil).NewFeedbackEvent), feedback)
+	return &MockServiceNewFeedbackEventCall{Call: call}
+}
+
+// MockServiceNewFeedbackEventCall wrap *gomock.Call
+type MockServiceNewFeedbackEventCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockServiceNewFeedbackEventCall) Return(arg0 analytics.TrackEvent) *MockServiceNewFeedbackEventCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockServiceNewFeedbackEventCall) Do(f func(string) analytics.TrackEvent) *MockServiceNewFeedbackEventCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockServiceNewFeedbackEventCall) DoAndReturn(f func(string) analytics.TrackEvent) *MockServiceNewFeedbackEventCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // NewGDSProjCreatedEvent mocks base method.
 func (m *MockService) NewGDSProjCreatedEvent() analytics.TrackEvent {
 	m.ctrl.T.Helper()
@@ -380,17 +418,17 @@ func (c *MockServiceNewSchemaRetrievalEventCall) DoAndReturn(f func(string, int6
 }
 
 // NewStartupEvent mocks base method.
-func (m *MockService) NewStartupEvent(transportMode config.TransportMode, tlsEnabled bool, mcpServer string) analytics.TrackEvent {
+func (m *MockService) NewStartupEvent(transportMode config.TransportMode, tlsEnabled bool, mcpServer string, connectionMode string) analytics.TrackEvent {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "NewStartupEvent", transportMode, tlsEnabled, mcpServer)
+	ret := m.ctrl.Call(m, "NewStartupEvent", transportMode, tlsEnabled, mcpServer, connectionMode)
 	ret0, _ := ret[0].(analytics.TrackEvent)
 	return ret0
 }
 
 // NewStartupEvent indicates an expected call of NewStartupEvent.
-func (mr *MockServiceMockRecorder) NewStartupEvent(transportMode, tlsEnabled, mcpServer any) *MockServiceNewStartupEventCall {
+func (mr *MockServiceMockRecorder) NewStartupEvent(transportMode, tlsEnabled, mcpServer, connectionMode any) *MockServiceNewStartupEventCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewStartupEvent", reflect.TypeOf((*MockService)(nil).NewStartupEvent), transportMode, tlsEnabled, mcpServer)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewStartupEvent", reflect.TypeOf((*MockService)(nil).NewStartupEvent), transportMode, tlsEnabled, mcpServer, connectionMode)
 	return &MockServiceNewStartupEventCall{Call: call}
 }
 
@@ -406,13 +444,13 @@ func (c *MockServiceNewStartupEventCall) Return(arg0 analytics.TrackEvent) *Mock
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockServiceNewStartupEventCall) Do(f func(config.TransportMode, bool, string) analytics.TrackEvent) *MockServiceNewStartupEventCall {
+func (c *MockServiceNewStartupEventCall) Do(f func(config.TransportMode, bool, string, string) analytics.TrackEvent) *MockServiceNewStartupEventCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockServiceNewStartupEventCall) DoAndReturn(f func(config.TransportMode, bool, string) analytics.TrackEvent) *MockServiceNewStartupEventCall {
+func (c *MockServiceNewStartupEventCall) DoAndReturn(f func(config.TransportMode, bool, string, string) analytics.TrackEvent) *MockServiceNewStartupEventCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
