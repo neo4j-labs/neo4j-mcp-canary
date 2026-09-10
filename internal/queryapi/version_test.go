@@ -26,14 +26,18 @@ func TestCheckMinimumVersion(t *testing.T) {
 		{"2026.06.0", true},
 		{"2025.12", true},
 		// Classic versions (self-managed or Aura; the optional -aura
-		// suffix doesn't affect the floor).
+		// suffix doesn't affect the floor). Self-managed servers report a
+		// full patch version (e.g. "5.26.30", the exact string a real
+		// neo4j:5.26-community discovery endpoint returns).
 		{"5.26", false},
+		{"5.26.30", false},
 		{"5.26-aura", false},
 		{"5.27", false},
 		{"5.27-aura", false},
 		{"6.0", false},
 		{"6.0-aura", false},
 		{"5.25", true},
+		{"5.25.99", true},
 		{"5.25-aura", true},
 		{"5.1-aura", true},
 		// Malformed / unrecognized.

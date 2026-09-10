@@ -48,17 +48,26 @@ const (
 // last classic-versioned (SemVer) release and an LTS; the floor applies
 // equally to self-managed and Aura releases — the optional "-aura" suffix
 // some Aura servers report has no bearing on whether a version clears it.
+//
+// Note this floor is about protocol/feature support (the queryType field),
+// not about any particular Query API client's wire compatibility — a client
+// pinned to a newer typed-JSON media type version than a given 5.26 server
+// supports can still fail independently of this check (see
+// test/containerrunner/container_runner.go's choice of test image for a
+// concrete example with github.com/neo4j-contrib/query-go-sdk).
 const (
 	minClassicMajor = 5
 	minClassicMinor = 26
 )
 
 // classicVersionPattern matches classic (pre-calendar-versioning) Neo4j
-// version strings, with or without the "-aura" suffix Aura sometimes
-// reports, e.g. "5.26", "5.27-aura". A version matching this pattern can
-// still be rejected by CheckMinimumVersion if it's below the floor — this
-// pattern only recognizes the shape, it doesn't imply acceptance.
-var classicVersionPattern = regexp.MustCompile(`^(\d+)\.(\d+)(?:-aura)?$`)
+// version strings, with an optional patch component (self-managed servers
+// report a full patch version, e.g. "5.26.30") and/or the "-aura" suffix
+// Aura sometimes reports, e.g. "5.26", "5.26.30", "5.27-aura". A version
+// matching this pattern can still be rejected by CheckMinimumVersion if it's
+// below the floor — this pattern only recognizes the shape, it doesn't imply
+// acceptance.
+var classicVersionPattern = regexp.MustCompile(`^(\d+)\.(\d+)(?:\.\d+)?(?:-aura)?$`)
 
 // calendarVersionPattern matches calendar-versioned Neo4j releases, e.g.
 // "2026.07", "2026.07.0". The patch component is optional and ignored —

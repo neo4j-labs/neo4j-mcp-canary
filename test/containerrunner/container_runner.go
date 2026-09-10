@@ -101,14 +101,24 @@ func Close(ctx context.Context) {
 	}
 }
 
-// createNeo4jContainer starts a Neo4j container for testing. The image
-// defaults to a classic-versioned release >= 5.26 (Neo4j's last
-// classic-versioned release and an LTS) so the same container can serve
-// both the Bolt driver (7687/tcp) and the Query API (7474/tcp) — the latter
-// requires clearing queryapi.CheckMinimumVersion's floor.
+// createNeo4jContainer starts a Neo4j container for testing. The same
+// container serves both the Bolt driver (7687/tcp) and the Query API
+// (7474/tcp).
+//
+// The image is calendar-versioned (>= 2026.07), not just >= 5.26 (the
+// version-gate's actual floor — see queryapi.CheckMinimumVersion) — this is
+// a test-infrastructure constraint, not a statement about what's supported:
+// github.com/neo4j-contrib/query-go-sdk v0.6.0 (our pinned, and currently
+// newest published, dependency) hardcodes its typed-JSON Accept/Content-Type
+// header to the "v1.1" media type, which Neo4j's Query API changelog dates
+// to the 2025.11 calendar release. A self-managed classic release like 5.26
+// predates that and returns 406 Not Acceptable for every request — the
+// server's Query API v2 endpoint works, but not at the media-type version
+// this SDK build insists on. Using a calendar-versioned image here just
+// keeps the integration tests wire-compatible with our current SDK pin.
 func createNeo4jContainer(ctx context.Context) (testcontainers.Container, string, string, error) {
 	req := testcontainers.ContainerRequest{
-		Image:        config.GetEnvWithDefault("NEO4J_IMAGE", "neo4j:5.26-community"),
+		Image:        config.GetEnvWithDefault("NEO4J_IMAGE", "neo4j:2026.07-community"),
 		ExposedPorts: []string{"7687/tcp", "7474/tcp"},
 		Env: map[string]string{
 			"NEO4J_AUTH":        fmt.Sprintf("%s/%s", config.GetEnvWithDefault("NEO4J_USERNAME", "neo4j"), config.GetEnvWithDefault("NEO4J_PASSWORD", "password")),
