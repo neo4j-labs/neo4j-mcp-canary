@@ -17,7 +17,20 @@ import (
 	"github.com/neo4j-labs/neo4j-mcp-canary/test/integration/helpers"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
+	neo4jconfig "github.com/neo4j/neo4j-go-driver/v6/neo4j/config"
 )
+
+// shortRetryBudget trims the driver's default 30s MaxTransactionRetryTime
+// (and default 5s-per-attempt SocketConnectTimeout) down to a few seconds.
+// An unreachable host is classified as a transient/retryable error, so
+// without this the driver quietly retries for its full default budget before
+// ExecuteReadQuery (and therefore verifyRequirements/Start) ever returns —
+// this is what made the "invalid host" case race against, and lose to, this
+// test's own external wait rather than actually failing fast.
+func shortRetryBudget(c *neo4jconfig.Config) {
+	c.MaxTransactionRetryTime = 3 * time.Second
+	c.SocketConnectTimeout = 2 * time.Second
+}
 
 func TestServerLifecycle(t *testing.T) {
 	t.Parallel()
@@ -65,7 +78,7 @@ func TestServerLifecycle(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 
-			driver, err := neo4j.NewDriver(tc.config.URI, neo4j.BasicAuth(tc.config.Username, tc.config.Password, ""))
+			driver, err := neo4j.NewDriver(tc.config.URI, neo4j.BasicAuth(tc.config.Username, tc.config.Password, ""), shortRetryBudget)
 			if err != nil {
 				t.Fatalf("failed to create Neo4j driver: %s", err.Error())
 			}
@@ -97,10 +110,8 @@ func TestServerLifecycle(t *testing.T) {
 
 			// Start() blocks on verifyRequirements before ever reaching the stdio
 			// serve loop, so an error case resolves as soon as the driver gives up
-			// on the bad host/database — but that failure only surfaces once the
-			// driver's own connection/DNS-resolution timeout elapses, which can
-			// take noticeably longer in a CI network sandbox than on a developer
-			// machine. The happy-path case never returns on its own (it blocks
+			// on the bad host/database — shortRetryBudget above caps that at a few
+			// seconds. The happy-path case never returns on its own (it blocks
 			// serving stdio), so its window only needs to be long enough to rule
 			// out an immediate, unexpected failure. Waiting on startErrCh (rather
 			// than polling on a fixed wall-clock deadline) also means the error
@@ -108,7 +119,7 @@ func TestServerLifecycle(t *testing.T) {
 			// always waiting out the full window.
 			wait := 4 * time.Second
 			if tc.expectError {
-				wait = 30 * time.Second
+				wait = 15 * time.Second
 			}
 
 			select {
