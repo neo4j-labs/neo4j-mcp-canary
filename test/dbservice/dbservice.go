@@ -80,3 +80,14 @@ func (dbs *dbService) GetDriverConf() *config.Config {
 
 	return cfg
 }
+
+// GetQueryAPIBaseURL returns the shared container's Query API base URL (e.g.
+// "http://host:port"), or "" when not using a container — external-DB mode
+// has no way to know whether the configured server even supports the Query
+// API, so callers should skip rather than guess.
+func (dbs *dbService) GetQueryAPIBaseURL() string {
+	if !dbs.useContainer {
+		return ""
+	}
+	return containerrunner.GetQueryAPIBaseURL()
+}

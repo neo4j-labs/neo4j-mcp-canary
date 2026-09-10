@@ -21,10 +21,11 @@ import (
 )
 
 var (
-	container testcontainers.Container
-	driver    *neo4j.Driver
-	cfg       *config.Config
-	once      sync.Once
+	container       testcontainers.Container
+	driver          *neo4j.Driver
+	cfg             *config.Config
+	queryAPIBaseURL string
+	once            sync.Once
 )
 
 // Start initializes shared resources for integration tests
@@ -54,13 +55,20 @@ func GetDriverConf() *config.Config {
 	}
 }
 
+// GetQueryAPIBaseURL returns the base URL (e.g. "http://host:port") for the
+// shared container's Query API / HTTP port. Empty until Start has completed.
+func GetQueryAPIBaseURL() string {
+	return queryAPIBaseURL
+}
+
 // startOnce start the testcontainer imaged
 func startOnce(ctx context.Context) {
-	ctr, boltURI, err := createNeo4jContainer(ctx)
+	ctr, boltURI, httpBaseURL, err := createNeo4jContainer(ctx)
 	if err != nil {
 		log.Fatalf("failed to start shared neo4j container: %v", err)
 	}
 	container = ctr
+	queryAPIBaseURL = httpBaseURL
 
 	cfg = &config.Config{
 		URI:           boltURI,
@@ -93,11 +101,15 @@ func Close(ctx context.Context) {
 	}
 }
 
-// createNeo4jContainer starts a Neo4j container for testing
-func createNeo4jContainer(ctx context.Context) (testcontainers.Container, string, error) {
+// createNeo4jContainer starts a Neo4j container for testing. The image
+// defaults to a classic-versioned release >= 5.26 (Neo4j's last
+// classic-versioned release and an LTS) so the same container can serve
+// both the Bolt driver (7687/tcp) and the Query API (7474/tcp) — the latter
+// requires clearing queryapi.CheckMinimumVersion's floor.
+func createNeo4jContainer(ctx context.Context) (testcontainers.Container, string, string, error) {
 	req := testcontainers.ContainerRequest{
-		Image:        config.GetEnvWithDefault("NEO4J_IMAGE", "neo4j:5.24.2-community"),
-		ExposedPorts: []string{"7687/tcp"},
+		Image:        config.GetEnvWithDefault("NEO4J_IMAGE", "neo4j:5.26-community"),
+		ExposedPorts: []string{"7687/tcp", "7474/tcp"},
 		Env: map[string]string{
 			"NEO4J_AUTH":        fmt.Sprintf("%s/%s", config.GetEnvWithDefault("NEO4J_USERNAME", "neo4j"), config.GetEnvWithDefault("NEO4J_PASSWORD", "password")),
 			"NEO4JLABS_PLUGINS": config.GetEnvWithDefault("NEO4JLABS_PLUGINS", `["apoc","graph-data-science"]`),
@@ -110,24 +122,30 @@ func createNeo4jContainer(ctx context.Context) (testcontainers.Container, string
 		Started:          true,
 	})
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 
 	host, err := ctr.Host(ctx)
 	if err != nil {
 		_ = ctr.Terminate(ctx)
-		return nil, "", err
+		return nil, "", "", err
 	}
 
 	port, err := ctr.MappedPort(ctx, "7687/tcp")
 	if err != nil {
 		_ = ctr.Terminate(ctx)
-		return nil, "", err
+		return nil, "", "", err
 	}
-
 	boltURI := fmt.Sprintf("bolt://%s:%s", host, port.Port())
 
-	return ctr, boltURI, nil
+	httpPort, err := ctr.MappedPort(ctx, "7474/tcp")
+	if err != nil {
+		_ = ctr.Terminate(ctx)
+		return nil, "", "", err
+	}
+	httpBaseURL := fmt.Sprintf("http://%s:%s", host, httpPort.Port())
+
+	return ctr, boltURI, httpBaseURL, nil
 }
 
 // waitForConnectivity waits for Neo4j connectivity with exponential backoff.

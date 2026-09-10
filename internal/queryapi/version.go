@@ -43,25 +43,22 @@ const (
 	minCalendarMonth = 7
 )
 
-// minClassicAuraMajor and minClassicAuraMinor are the minimum classic
-// (pre-calendar-versioning) release this package accepts, and only when the
-// version string carries the "-aura" suffix — see checkMinimumVersion for
-// why a bare classic version without that suffix is rejected outright.
-// 5.27-aura is the classic-versioned counterpart to the 2026.07 calendar
-// floor — see the calendar floor's doc comment for why.
+// minClassicMajor and minClassicMinor are the minimum classic
+// (pre-calendar-versioning) release this package accepts. 5.26 is Neo4j's
+// last classic-versioned (SemVer) release and an LTS; the floor applies
+// equally to self-managed and Aura releases — the optional "-aura" suffix
+// some Aura servers report has no bearing on whether a version clears it.
 const (
-	minClassicAuraMajor = 5
-	minClassicAuraMinor = 27
+	minClassicMajor = 5
+	minClassicMinor = 26
 )
 
-// classicAuraVersionPattern matches classic Neo4j versions reported by Aura,
-// e.g. "5.26-aura", "5.27-aura". Aura can report this style even after the
-// calendar-versioning cutover, so it is checked against its own floor
-// (minClassicAuraMajor.minClassicAuraMinor) rather than the calendar floor.
-// Note that a version matching this pattern (e.g. "5.26-aura") can still be
-// rejected by CheckMinimumVersion if it's below the floor — this pattern
-// only recognizes the shape, it doesn't imply acceptance.
-var classicAuraVersionPattern = regexp.MustCompile(`^(\d+)\.(\d+)-aura$`)
+// classicVersionPattern matches classic (pre-calendar-versioning) Neo4j
+// version strings, with or without the "-aura" suffix Aura sometimes
+// reports, e.g. "5.26", "5.27-aura". A version matching this pattern can
+// still be rejected by CheckMinimumVersion if it's below the floor — this
+// pattern only recognizes the shape, it doesn't imply acceptance.
+var classicVersionPattern = regexp.MustCompile(`^(\d+)\.(\d+)(?:-aura)?$`)
 
 // calendarVersionPattern matches calendar-versioned Neo4j releases, e.g.
 // "2026.07", "2026.07.0". The patch component is optional and ignored —
@@ -140,29 +137,19 @@ func EnsureMinimumVersion(ctx context.Context, httpClient *http.Client, baseURL 
 //
 //   - Calendar-versioned releases (e.g. "2026.07", "2026.07.0") must be >=
 //     2026.07.
-//   - Classic-versioned Aura releases (e.g. "5.27-aura") must be >= 5.27-aura.
-//   - Anything else — including a bare classic version with no "-aura"
-//     suffix (e.g. "5.27"), even if numerically >= 5.27 — is rejected: the
-//     Query API's queryType field, which read/write classification depends
-//     on, never shipped on self-managed classic-versioned releases.
+//   - Classic-versioned releases (e.g. "5.26", "5.27-aura"), self-managed or
+//     Aura alike, must be >= 5.26. The optional "-aura" suffix some Aura
+//     servers report has no bearing on this floor.
 //
 // Returns a *VersionError on any rejection so callers can report the exact
 // reason to the operator.
 func CheckMinimumVersion(version string) error {
-	if m := classicAuraVersionPattern.FindStringSubmatch(version); m != nil {
-		major, minor := atoiMust(m[1]), atoiMust(m[2])
-		if major < minClassicAuraMajor || (major == minClassicAuraMajor && minor < minClassicAuraMinor) {
-			return &VersionError{
-				Got: version,
-				Reason: fmt.Sprintf(
-					"classic Aura versions require at least %d.%d-aura",
-					minClassicAuraMajor, minClassicAuraMinor,
-				),
-			}
-		}
-		return nil
-	}
-
+	// calendarVersionPattern is checked first because it's unambiguous (an
+	// exact 4-digit year) — classicVersionPattern's unanchored \d+ major
+	// would otherwise also match a calendar-shaped string like "2026.06"
+	// (major=2026, minor=6), which trivially clears the classic floor of
+	// 5.26 and would be silently accepted instead of correctly rejected as
+	// a too-old calendar release.
 	if m := calendarVersionPattern.FindStringSubmatch(version); m != nil {
 		year, month := atoiMust(m[1]), atoiMust(m[2])
 		if year < minCalendarYear || (year == minCalendarYear && month < minCalendarMonth) {
@@ -177,9 +164,23 @@ func CheckMinimumVersion(version string) error {
 		return nil
 	}
 
+	if m := classicVersionPattern.FindStringSubmatch(version); m != nil {
+		major, minor := atoiMust(m[1]), atoiMust(m[2])
+		if major < minClassicMajor || (major == minClassicMajor && minor < minClassicMinor) {
+			return &VersionError{
+				Got: version,
+				Reason: fmt.Sprintf(
+					"classic-versioned releases require at least %d.%d",
+					minClassicMajor, minClassicMinor,
+				),
+			}
+		}
+		return nil
+	}
+
 	return &VersionError{
 		Got:    version,
-		Reason: "unrecognized version format; expected a calendar version (e.g. \"2026.07\") or a classic Aura version (e.g. \"5.27-aura\")",
+		Reason: "unrecognized version format; expected a calendar version (e.g. \"2026.07\") or a classic version (e.g. \"5.26\" or \"5.27-aura\")",
 	}
 }
 

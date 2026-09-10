@@ -1,0 +1,10 @@
+kind: Fixed
+body: >-
+  Fixed a bug in the Query API version gate (CheckMinimumVersion) that
+  rejected every self-managed classic-versioned Neo4j release outright,
+  regardless of how new it was, unless the version string carried Aura's
+  "-aura" suffix. The correct requirement is a plain floor of 5.26 on the
+  classic major.minor version — the presence of the "-aura" suffix has no
+  bearing on it. Query API mode now correctly accepts Neo4j 5.26 and newer
+  self-managed releases (5.26 is Neo4j's last classic-versioned release and
+  an LTS), in addition to the existing 2026.07+ calendar-versioned floor.

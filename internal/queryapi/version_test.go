@@ -25,16 +25,17 @@ func TestCheckMinimumVersion(t *testing.T) {
 		{"2026.06", true},
 		{"2026.06.0", true},
 		{"2025.12", true},
-		// Classic Aura versions.
+		// Classic versions (self-managed or Aura; the optional -aura
+		// suffix doesn't affect the floor).
+		{"5.26", false},
+		{"5.26-aura", false},
+		{"5.27", false},
 		{"5.27-aura", false},
-		{"5.28-aura", false},
+		{"6.0", false},
 		{"6.0-aura", false},
-		{"5.26-aura", true},
+		{"5.25", true},
+		{"5.25-aura", true},
 		{"5.1-aura", true},
-		// Bare classic versions (no -aura suffix) are always rejected, even
-		// when numerically >= the Aura floor.
-		{"5.28", true},
-		{"5.27", true},
 		// Malformed / unrecognized.
 		{"", true},
 		{"not-a-version", true},
