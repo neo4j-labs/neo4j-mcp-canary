@@ -3,11 +3,11 @@
 
 package gds
 
-import "github.com/mark3labs/mcp-go/mcp"
+import "github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 
-func ListGDSProceduresSpec() mcp.Tool {
-	return mcp.NewTool("list-gds-procedures",
-		mcp.WithDescription(
+func ListGDSProceduresSpec() mcpsdk.Tool {
+	return mcpsdk.NewTool("list-gds-procedures",
+		mcpsdk.WithDescription(
 			"Use this tool to discover what graph science and analytics functions are available in the current Neo4j environment. "+
 				"It returns a structured list describing each function — what it does, how to use it, the inputs it needs, and what kind of results it produces. "+
 				"Do this before any reasoning, query generation, or analysis so you know what capabilities exist. "+
@@ -17,10 +17,10 @@ func ListGDSProceduresSpec() mcp.Tool {
 				"Remember to use unique names for graph data science projections to avoid collisions and to drop them afterwards to save memory. "+
 				"You must always tell the user the function you will use.",
 		),
-		mcp.WithTitleAnnotation("List available Neo4j GDS procedures"),
-		mcp.WithReadOnlyHintAnnotation(true),
-		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithOpenWorldHintAnnotation(true),
+		mcpsdk.WithTitleAnnotation("List available Neo4j GDS procedures"),
+		mcpsdk.WithReadOnlyHintAnnotation(true),
+		mcpsdk.WithIdempotentHintAnnotation(true),
+		mcpsdk.WithDestructiveHintAnnotation(false),
+		mcpsdk.WithOpenWorldHintAnnotation(true),
 	)
 }

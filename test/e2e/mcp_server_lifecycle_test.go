@@ -9,10 +9,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk/mcpsdktest"
 	"github.com/neo4j-labs/neo4j-mcp-canary/test/e2e/helpers"
-
-	"github.com/mark3labs/mcp-go/client"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 func TestSeverLifecycleMCPE2E(t *testing.T) {
@@ -30,14 +28,11 @@ func TestSeverLifecycleMCPE2E(t *testing.T) {
 			"--neo4j-database", cfg.Database,
 		}
 
-		mcpClient, err := client.NewStdioMCPClient(server, []string{}, args...)
-		if err != nil {
-			t.Fatalf("failed to create MCP client: %v", err)
-		}
+		mcpClient := mcpsdktest.NewStdioClient("test-client", "1.0.0", server, args)
 		helpers.NewE2ETestContext(t, dbs.GetDriver())
 
 		// Test server initialization
-		initializeResponse, err := mcpClient.Initialize(ctx, helpers.BuildInitializeRequest())
+		initializeResponse, err := mcpClient.Initialize(ctx)
 		if err != nil {
 			t.Fatalf("failed to initialize MCP server: %v", err)
 		}
@@ -48,7 +43,7 @@ func TestSeverLifecycleMCPE2E(t *testing.T) {
 		}
 
 		// Test basic functionality - list tools
-		listToolsResponse, err := mcpClient.ListTools(ctx, mcp.ListToolsRequest{})
+		listToolsResponse, err := mcpClient.ListTools(ctx)
 		if err != nil {
 			t.Fatalf("failed to list tools: %v", err)
 		}
@@ -59,20 +54,14 @@ func TestSeverLifecycleMCPE2E(t *testing.T) {
 		}
 
 		// Test calling a tool, get-schema for simplicity.
-		callToolRequest := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
-				Name: "get-schema",
-			},
-		}
-
-		callToolResponse, err := mcpClient.CallTool(ctx, callToolRequest)
+		callToolResponse, err := mcpClient.CallTool(ctx, "get-schema", nil)
 		if err != nil {
 			t.Fatalf("failed to call get-schema tool: %v", err)
 		}
 
 		// Verify the tool call was successful
 		if callToolResponse.IsError {
-			textContent, ok := mcp.AsTextContent(callToolResponse.Content[0])
+			textContent, ok := mcpsdktest.AsTextContent(callToolResponse.Content[0])
 			if !ok {
 				t.Fatalf("expected error as TextContent, got %T", callToolResponse.Content[0])
 			}

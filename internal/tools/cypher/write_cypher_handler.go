@@ -11,27 +11,27 @@ import (
 
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 )
 
-func WriteCypherHandler(deps *tools.ToolDependencies) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func WriteCypherHandler(deps *tools.ToolDependencies) func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	return func(ctx context.Context, request *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
 		return handleWriteCypher(ctx, request, deps)
 	}
 }
 
-func handleWriteCypher(ctx context.Context, request mcp.CallToolRequest, deps *tools.ToolDependencies) (*mcp.CallToolResult, error) {
+func handleWriteCypher(ctx context.Context, request *mcpsdk.CallToolRequest, deps *tools.ToolDependencies) (*mcpsdk.CallToolResult, error) {
 	if deps.DBService == nil {
 		errMessage := "Database service is not initialized"
 		slog.Error(errMessage)
-		return mcp.NewToolResultError(errMessage), nil
+		return mcpsdk.NewToolResultError(errMessage), nil
 	}
 
 	var args WriteCypherInput
 	// Use our custom BindArguments that preserves integer types
 	if err := request.BindArguments(&args); err != nil {
 		slog.Error("error binding arguments", "error", err)
-		return mcp.NewToolResultError(err.Error()), nil
+		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
 
 	Query := args.Query
@@ -41,7 +41,7 @@ func handleWriteCypher(ctx context.Context, request mcp.CallToolRequest, deps *t
 	if Query == "" {
 		errMessage := "Query parameter is required and cannot be empty"
 		slog.Error(errMessage)
-		return mcp.NewToolResultError(errMessage), nil
+		return mcpsdk.NewToolResultError(errMessage), nil
 	}
 
 	slog.Info("executing write cypher query", "query", Query)
@@ -82,25 +82,25 @@ func handleWriteCypher(ctx context.Context, request mcp.CallToolRequest, deps *t
 				deps.CypherTimeout,
 			)
 			slog.Info("write-cypher query timed out", "query", Query, "timeout", deps.CypherTimeout)
-			return mcp.NewToolResultError(errMessage), nil
+			return mcpsdk.NewToolResultError(errMessage), nil
 		case errors.Is(err, context.Canceled):
 			slog.Info("write-cypher query cancelled", "query", Query)
-			return mcp.NewToolResultError("write-cypher cancelled: query execution was cancelled before completion"), nil
+			return mcpsdk.NewToolResultError("write-cypher cancelled: query execution was cancelled before completion"), nil
 		}
 		slog.Error("error executing cypher query", "error", err)
-		return mcp.NewToolResultError(err.Error()), nil
+		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
 
 	response, err := deps.DBService.QueryResultToJSON(result)
 	if err != nil {
 		slog.Error("error formatting query results", "error", err)
-		return mcp.NewToolResultError(err.Error()), nil
+		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
 	response, err = tools.EncodeOutput(response, deps.OutputFormat)
 	if err != nil {
 		slog.Error("error encoding query results", "error", err)
-		return mcp.NewToolResultError(err.Error()), nil
+		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
 
-	return mcp.NewToolResultText(response), nil
+	return mcpsdk.NewToolResultText(response), nil
 }

@@ -8,30 +8,29 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
-
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // GiveFeedbackHandler returns the MCP handler for the give-feedback tool.
-func GiveFeedbackHandler(deps *tools.ToolDependencies) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func GiveFeedbackHandler(deps *tools.ToolDependencies) mcpsdk.ToolHandlerFunc {
+	return func(ctx context.Context, request *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
 		return handleGiveFeedback(ctx, request, deps)
 	}
 }
 
-func handleGiveFeedback(_ context.Context, request mcp.CallToolRequest, deps *tools.ToolDependencies) (*mcp.CallToolResult, error) {
+func handleGiveFeedback(_ context.Context, request *mcpsdk.CallToolRequest, deps *tools.ToolDependencies) (*mcpsdk.CallToolResult, error) {
 	var args GiveFeedbackInput
 	if err := request.BindArguments(&args); err != nil {
 		slog.Error("error binding arguments", "error", err)
-		return mcp.NewToolResultError(err.Error()), nil
+		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
 
 	feedback := args.Feedback
 	if feedback == "" {
 		errMessage := "feedback parameter is required and cannot be empty"
 		slog.Error(errMessage)
-		return mcp.NewToolResultError(errMessage), nil
+		return mcpsdk.NewToolResultError(errMessage), nil
 	}
 
 	// The schema already advertises maxLength, but a client is not required
@@ -43,7 +42,7 @@ func handleGiveFeedback(_ context.Context, request mcp.CallToolRequest, deps *to
 			len(feedback), feedbackMaxLength,
 		)
 		slog.Error(errMessage)
-		return mcp.NewToolResultError(errMessage), nil
+		return mcpsdk.NewToolResultError(errMessage), nil
 	}
 
 	// Feedback is only recorded when analytics/telemetry is enabled, same as
@@ -57,5 +56,5 @@ func handleGiveFeedback(_ context.Context, request mcp.CallToolRequest, deps *to
 	}
 
 	slog.Info("received feedback", "feedback", feedback)
-	return mcp.NewToolResultText("Thank you for your feedback."), nil
+	return mcpsdk.NewToolResultText("Thank you for your feedback."), nil
 }

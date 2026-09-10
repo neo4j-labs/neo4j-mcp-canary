@@ -26,15 +26,18 @@ func TestCheckMinimumVersion(t *testing.T) {
 		{"2026.06.0", true},
 		{"2025.12", true},
 		// Classic Aura versions.
+		{"5.26-aura", false},
 		{"5.27-aura", false},
-		{"5.28-aura", false},
 		{"6.0-aura", false},
-		{"5.26-aura", true},
+		{"5.25-aura", true},
 		{"5.1-aura", true},
 		// Bare classic versions (no -aura suffix) are always rejected, even
-		// when numerically >= the Aura floor.
-		{"5.28", true},
+		// when numerically >= the Aura floor — see minClassicAuraMajor/Minor's
+		// doc comment for why (query-go-sdk's media-type version isn't
+		// supported by self-managed classic servers).
 		{"5.27", true},
+		{"5.26", true},
+		{"5.26.30", true},
 		// Malformed / unrecognized.
 		{"", true},
 		{"not-a-version", true},

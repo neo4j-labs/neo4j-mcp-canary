@@ -4,7 +4,7 @@
 package feedback
 
 import (
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 )
 
 // feedbackMaxLength is the maximum length of a single feedback submission.
@@ -20,9 +20,9 @@ type GiveFeedbackInput struct {
 }
 
 // GiveFeedbackSpec declares the MCP tool schema for give-feedback.
-func GiveFeedbackSpec() mcp.Tool {
-	return mcp.NewTool("give-feedback",
-		mcp.WithDescription(
+func GiveFeedbackSpec() mcpsdk.Tool {
+	return mcpsdk.NewTool("give-feedback",
+		mcpsdk.WithDescription(
 			"Use this tool to give feedback about this MCP server itself — positive or negative. "+
 				"This is for feedback on the server's tools, behaviour, documentation, or overall experience, "+
 				"not for reporting Cypher errors or issues with the underlying Neo4j database. "+
@@ -30,15 +30,15 @@ func GiveFeedbackSpec() mcp.Tool {
 				"Use this when the user explicitly asks to leave feedback, or when you have a clear, "+
 				"concrete observation about the server worth surfacing to its maintainers.",
 		),
-		mcp.WithString("feedback",
-			mcp.Required(),
-			mcp.MaxLength(feedbackMaxLength),
-			mcp.Description("The feedback to submit, positive or negative. Maximum 300 characters. Required."),
+		mcpsdk.WithString("feedback",
+			mcpsdk.Required(),
+			mcpsdk.MaxLength(feedbackMaxLength),
+			mcpsdk.Description("The feedback to submit, positive or negative. Maximum 300 characters. Required."),
 		),
-		mcp.WithTitleAnnotation("Give Feedback"),
-		mcp.WithReadOnlyHintAnnotation(true),
-		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithOpenWorldHintAnnotation(false),
+		mcpsdk.WithTitleAnnotation("Give Feedback"),
+		mcpsdk.WithReadOnlyHintAnnotation(true),
+		mcpsdk.WithDestructiveHintAnnotation(false),
+		mcpsdk.WithIdempotentHintAnnotation(false),
+		mcpsdk.WithOpenWorldHintAnnotation(false),
 	)
 }

@@ -15,10 +15,10 @@ import (
 	amocks "github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics/mocks"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
 	db "github.com/neo4j-labs/neo4j-mcp-canary/internal/database/mocks"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/cypher"
 
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"go.uber.org/mock/gomock"
 )
@@ -62,8 +62,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{
 					"query":  "MATCH (n:Person {name: $name}) RETURN n",
 					"params": map[string]any{"name": "Alice"},
@@ -100,8 +100,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{
 					"query": "MATCH (n) RETURN count(n)",
 				},
@@ -127,10 +127,18 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		// Test with invalid argument structure that should cause BindArguments to fail
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
-				Arguments: "invalid string instead of map",
+		// Test with an argument shape that should cause BindArguments to fail.
+		// Under mark3labs, mcp.CallToolParams.Arguments was typed `any`, so this
+		// case fed the whole Arguments field a bare string to simulate a client
+		// sending a non-object payload. mcpsdk.CallToolParams.Arguments is
+		// strictly map[string]any (decodeArguments in the SDK adapter already
+		// rejects a non-object payload before any handler is invoked), so that
+		// exact shape can no longer be constructed here. We instead trigger the
+		// same BindArguments error path via a field-level type mismatch inside an
+		// otherwise-valid map.
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
+				Arguments: map[string]any{"query": 12345},
 			},
 		}
 
@@ -155,8 +163,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{
 					"invalid_field": "value",
 				},
@@ -185,8 +193,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{
 					"query": "",
 				},
@@ -211,8 +219,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{
 					"query": "MATCH (n) RETURN n",
 				},
@@ -236,7 +244,14 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		result, err := handler(context.Background(), mcp.CallToolRequest{})
+		// mcpsdk.CallToolRequest.Params is a pointer (unlike mark3labs' value
+		// CallToolParams), and BindArguments dereferences it unconditionally, so
+		// a bare &mcpsdk.CallToolRequest{} with a nil Params would panic before
+		// ever reaching the empty-query check this test actually exercises. The
+		// real server adapter (mcpsdk.adaptHandler) never constructs a request
+		// with a nil Params, so an explicit empty CallToolParams here matches
+		// how the handler is invoked in production.
+		result, err := handler(context.Background(), &mcpsdk.CallToolRequest{Params: &mcpsdk.CallToolParams{}})
 
 		if err != nil {
 			t.Errorf("Expected no error from handler, got: %v", err)
@@ -262,8 +277,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{
 					"query": "INVALID CYPHER",
 				},
@@ -299,8 +314,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{
 					"query": "MATCH (n) RETURN n",
 				},
@@ -329,8 +344,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{
 					"query": "CREATE (n:Test)",
 				},
@@ -358,8 +373,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{
 					"query": "MATCH (n) RETURN n",
 				},
@@ -406,8 +421,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{
 					"query": "MATCH (n:Company) RETURN n.name",
 				},
@@ -424,7 +439,7 @@ func TestReadCypherHandler(t *testing.T) {
 		if len(result.Content) == 0 {
 			t.Fatal("expected content on result")
 		}
-		text, ok := result.Content[0].(mcp.TextContent)
+		text, ok := mcpsdk.AsTextContent(result.Content[0])
 		if !ok {
 			t.Fatalf("expected TextContent, got %T", result.Content[0])
 		}
@@ -472,8 +487,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{
 					"query": "MATCH (n:Company) RETURN n",
 				},
@@ -487,7 +502,7 @@ func TestReadCypherHandler(t *testing.T) {
 		if result == nil || result.IsError {
 			t.Fatalf("expected success result with truncated envelope, got %+v", result)
 		}
-		text, _ := result.Content[0].(mcp.TextContent)
+		text, _ := mcpsdk.AsTextContent(result.Content[0])
 		if !strings.Contains(text.Text, `"truncationReason":"bytes"`) {
 			t.Errorf("expected truncationReason=bytes in response, got: %s", text.Text)
 		}
@@ -514,8 +529,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{
 					"query": "PROFILE MATCH (n) RETURN count(n)",
 				},
@@ -532,7 +547,7 @@ func TestReadCypherHandler(t *testing.T) {
 		if len(result.Content) == 0 {
 			t.Fatal("expected content on result")
 		}
-		text, ok := result.Content[0].(mcp.TextContent)
+		text, ok := mcpsdk.AsTextContent(result.Content[0])
 		if !ok {
 			t.Fatalf("expected TextContent, got %T", result.Content[0])
 		}
@@ -575,8 +590,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{
 					"query": "MATCH (n) RETURN count(n)",
 				},
@@ -625,8 +640,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{
 					"query": "MATCH (n:Company) RETURN n",
 				},
@@ -643,7 +658,7 @@ func TestReadCypherHandler(t *testing.T) {
 		if len(result.Content) == 0 {
 			t.Fatal("expected content on result")
 		}
-		text, ok := result.Content[0].(mcp.TextContent)
+		text, ok := mcpsdk.AsTextContent(result.Content[0])
 		if !ok {
 			t.Fatalf("expected TextContent, got %T", result.Content[0])
 		}
@@ -685,8 +700,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{
 					"query": "MATCH (n:Company) RETURN n LIMIT 50",
 				},
@@ -730,8 +745,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{
 					"query": "MATCH (n) RETURN n LIMIT 10",
 				},
@@ -790,8 +805,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{"query": q},
 			},
 		}
@@ -835,8 +850,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{"query": q},
 			},
 		}
@@ -887,8 +902,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{"query": q},
 			},
 		}
@@ -928,8 +943,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{"query": "MATCH (n)-[*]-(m) RETURN m"},
 			},
 		}
@@ -941,7 +956,7 @@ func TestReadCypherHandler(t *testing.T) {
 		if result == nil || !result.IsError {
 			t.Fatalf("expected error result for timeout, got: %+v", result)
 		}
-		text, ok := result.Content[0].(mcp.TextContent)
+		text, ok := mcpsdk.AsTextContent(result.Content[0])
 		if !ok {
 			t.Fatalf("expected TextContent, got %T", result.Content[0])
 		}
@@ -982,8 +997,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{"query": "MATCH (n) RETURN n"},
 			},
 		}
@@ -995,7 +1010,7 @@ func TestReadCypherHandler(t *testing.T) {
 		if result == nil || !result.IsError {
 			t.Fatalf("expected error result for cancellation, got: %+v", result)
 		}
-		text, ok := result.Content[0].(mcp.TextContent)
+		text, ok := mcpsdk.AsTextContent(result.Content[0])
 		if !ok {
 			t.Fatalf("expected TextContent, got %T", result.Content[0])
 		}
@@ -1029,8 +1044,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{"query": "MATCH (n) RETURN n"},
 			},
 		}
@@ -1041,7 +1056,7 @@ func TestReadCypherHandler(t *testing.T) {
 		if result == nil || !result.IsError {
 			t.Fatalf("expected error result, got: %+v", result)
 		}
-		text, ok := result.Content[0].(mcp.TextContent)
+		text, ok := mcpsdk.AsTextContent(result.Content[0])
 		if !ok {
 			t.Fatalf("expected TextContent, got %T", result.Content[0])
 		}
@@ -1080,8 +1095,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{"query": "EXPLAIN MATCH (n) RETURN n"},
 			},
 		}
@@ -1093,7 +1108,7 @@ func TestReadCypherHandler(t *testing.T) {
 		if result == nil || !result.IsError {
 			t.Fatalf("expected error result for EXPLAIN, got: %+v", result)
 		}
-		text, ok := result.Content[0].(mcp.TextContent)
+		text, ok := mcpsdk.AsTextContent(result.Content[0])
 		if !ok {
 			t.Fatalf("expected TextContent, got %T", result.Content[0])
 		}
@@ -1146,8 +1161,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{"query": "MATCH (n) WHERE false SET n.x = 1 RETURN n"},
 			},
 		}
@@ -1159,7 +1174,7 @@ func TestReadCypherHandler(t *testing.T) {
 		if result == nil || !result.IsError {
 			t.Fatalf("expected error result for AccessMode, got: %+v", result)
 		}
-		text, ok := result.Content[0].(mcp.TextContent)
+		text, ok := mcpsdk.AsTextContent(result.Content[0])
 		if !ok {
 			t.Fatalf("expected TextContent, got %T", result.Content[0])
 		}
@@ -1207,8 +1222,8 @@ func TestReadCypherHandler(t *testing.T) {
 		}
 
 		handler := cypher.ReadCypherHandler(deps)
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{"query": "MATCH (n) WHERE false REMOVE n.x RETURN n"},
 			},
 		}
@@ -1220,7 +1235,7 @@ func TestReadCypherHandler(t *testing.T) {
 		if result == nil || !result.IsError {
 			t.Fatalf("expected error result, got: %+v", result)
 		}
-		text, ok := result.Content[0].(mcp.TextContent)
+		text, ok := mcpsdk.AsTextContent(result.Content[0])
 		if !ok {
 			t.Fatalf("expected TextContent, got %T", result.Content[0])
 		}

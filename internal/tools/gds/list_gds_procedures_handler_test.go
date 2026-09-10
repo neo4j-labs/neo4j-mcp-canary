@@ -9,10 +9,10 @@ import (
 	"testing"
 
 	db "github.com/neo4j-labs/neo4j-mcp-canary/internal/database/mocks"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/gds"
 
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"go.uber.org/mock/gomock"
 )
@@ -35,7 +35,7 @@ func TestListGdsProceduresHandler(t *testing.T) {
 		}
 
 		handler := gds.ListGdsProceduresHandler(deps)
-		request := mcp.CallToolRequest{}
+		request := &mcpsdk.CallToolRequest{}
 
 		result, err := handler(context.Background(), request)
 
@@ -53,7 +53,7 @@ func TestListGdsProceduresHandler(t *testing.T) {
 		}
 
 		handler := gds.ListGdsProceduresHandler(deps)
-		request := mcp.CallToolRequest{}
+		request := &mcpsdk.CallToolRequest{}
 
 		result, err := handler(context.Background(), request)
 
@@ -76,7 +76,7 @@ func TestListGdsProceduresHandler(t *testing.T) {
 		}
 
 		handler := gds.ListGdsProceduresHandler(deps)
-		request := mcp.CallToolRequest{}
+		request := &mcpsdk.CallToolRequest{}
 
 		result, err := handler(context.Background(), request)
 
@@ -103,7 +103,7 @@ func TestListGdsProceduresHandler(t *testing.T) {
 		}
 
 		handler := gds.ListGdsProceduresHandler(deps)
-		request := mcp.CallToolRequest{}
+		request := &mcpsdk.CallToolRequest{}
 
 		result, err := handler(context.Background(), request)
 

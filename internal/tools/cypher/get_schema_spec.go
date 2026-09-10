@@ -4,19 +4,19 @@
 package cypher
 
 import (
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 )
 
-func GetSchemaSpec() mcp.Tool {
-	return mcp.NewTool("get-schema",
-		mcp.WithDescription(`
+func GetSchemaSpec() mcpsdk.Tool {
+	return mcpsdk.NewTool("get-schema",
+		mcpsdk.WithDescription(`
 		Retrieve the schema information from the Neo4j database, including node labels, relationship types, and property keys.
 		If the database contains no data, no schema information is returned.
 		Requires APOC to be installed on the target database (uses apoc.meta.schema).`),
-		mcp.WithTitleAnnotation("Get Neo4j Schema"),
-		mcp.WithReadOnlyHintAnnotation(true),
-		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithOpenWorldHintAnnotation(true),
+		mcpsdk.WithTitleAnnotation("Get Neo4j Schema"),
+		mcpsdk.WithReadOnlyHintAnnotation(true),
+		mcpsdk.WithIdempotentHintAnnotation(true),
+		mcpsdk.WithDestructiveHintAnnotation(false),
+		mcpsdk.WithOpenWorldHintAnnotation(true),
 	)
 }

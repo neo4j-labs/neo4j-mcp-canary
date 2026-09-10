@@ -18,7 +18,6 @@ import (
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
 
 	"github.com/google/uuid"
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/stretchr/testify/assert"
 )
@@ -160,14 +159,4 @@ func (tc *E2ETestContext) AssertJSONListContainsObject(responseBody string, expe
 	assert.NoError(tc.t, err)
 
 	assert.Contains(tc.t, actualList, expectedNormalized, "List at '%s' did not contain expected object")
-}
-
-func BuildInitializeRequest() mcp.InitializeRequest {
-	InitializeRequest := mcp.InitializeRequest{}
-	InitializeRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
-	InitializeRequest.Params.ClientInfo = mcp.Implementation{
-		Name:    "test-client",
-		Version: "1.0.0",
-	}
-	return InitializeRequest
 }

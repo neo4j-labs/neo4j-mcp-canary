@@ -8,9 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
-
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 const listGdsProceduresQuery = `
@@ -20,36 +19,36 @@ AND name CONTAINS "stream"
 AND NOT (name CONTAINS "estimate")
 RETURN name, description, signature, type`
 
-func ListGdsProceduresHandler(deps *tools.ToolDependencies) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func ListGdsProceduresHandler(deps *tools.ToolDependencies) func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	return func(ctx context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
 		return handleListGdsProcedures(ctx, deps)
 	}
 }
 
-func handleListGdsProcedures(ctx context.Context, deps *tools.ToolDependencies) (*mcp.CallToolResult, error) {
+func handleListGdsProcedures(ctx context.Context, deps *tools.ToolDependencies) (*mcpsdk.CallToolResult, error) {
 	if deps.DBService == nil {
 		errMessage := "Database service is not initialized"
 		slog.Error(errMessage)
-		return mcp.NewToolResultError(errMessage), nil
+		return mcpsdk.NewToolResultError(errMessage), nil
 	}
 
 	records, err := deps.DBService.ExecuteReadQuery(ctx, listGdsProceduresQuery, nil)
 	if err != nil {
 		formattedErrorMessage := fmt.Errorf("failed to execute list-gds-procedure query: %v. Ensure that the Graph Data Science (GDS) library is installed and properly configured in your Neo4j database", err)
 		slog.Error("failed to execute list gds procedures query", "error", err)
-		return mcp.NewToolResultError(formattedErrorMessage.Error()), nil
+		return mcpsdk.NewToolResultError(formattedErrorMessage.Error()), nil
 	}
 
 	response, err := deps.DBService.Neo4jRecordsToJSON(records)
 	if err != nil {
 		slog.Error("failed to format list-gds-procedures results to JSON", "error", err)
-		return mcp.NewToolResultError(err.Error()), nil
+		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
 	response, err = tools.EncodeOutput(response, deps.OutputFormat)
 	if err != nil {
 		slog.Error("failed to encode list-gds-procedures results", "error", err)
-		return mcp.NewToolResultError(err.Error()), nil
+		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
 
-	return mcp.NewToolResultText(response), nil
+	return mcpsdk.NewToolResultText(response), nil
 }

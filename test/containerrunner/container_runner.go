@@ -21,10 +21,11 @@ import (
 )
 
 var (
-	container testcontainers.Container
-	driver    *neo4j.Driver
-	cfg       *config.Config
-	once      sync.Once
+	container       testcontainers.Container
+	driver          *neo4j.Driver
+	cfg             *config.Config
+	queryAPIBaseURL string
+	once            sync.Once
 )
 
 // Start initializes shared resources for integration tests
@@ -54,13 +55,20 @@ func GetDriverConf() *config.Config {
 	}
 }
 
+// GetQueryAPIBaseURL returns the base URL (e.g. "http://host:port") for the
+// shared container's Query API / HTTP port. Empty until Start has completed.
+func GetQueryAPIBaseURL() string {
+	return queryAPIBaseURL
+}
+
 // startOnce start the testcontainer imaged
 func startOnce(ctx context.Context) {
-	ctr, boltURI, err := createNeo4jContainer(ctx)
+	ctr, boltURI, httpBaseURL, err := createNeo4jContainer(ctx)
 	if err != nil {
 		log.Fatalf("failed to start shared neo4j container: %v", err)
 	}
 	container = ctr
+	queryAPIBaseURL = httpBaseURL
 
 	cfg = &config.Config{
 		URI:           boltURI,
@@ -93,11 +101,28 @@ func Close(ctx context.Context) {
 	}
 }
 
-// createNeo4jContainer starts a Neo4j container for testing
-func createNeo4jContainer(ctx context.Context) (testcontainers.Container, string, error) {
+// createNeo4jContainer starts a Neo4j container for testing. The same
+// container serves both the Bolt driver (7687/tcp) and the Query API
+// (7474/tcp).
+//
+// The image is calendar-versioned (>= 2026.07) since queryapi.CheckMinimumVersion
+// only accepts a self-managed image via the calendar-versioned path — bare
+// classic versions (e.g. "5.26", with no "-aura" suffix) are always
+// rejected, only classic-Aura-reported versions ("5.26-aura") pass via that
+// branch. That's not just a version-gate policy either:
+// github.com/neo4j-contrib/query-go-sdk v0.6.0 (our pinned, and currently
+// newest published, dependency) hardcodes its typed-JSON Accept/Content-Type
+// header to the "v1.1" media type, which Neo4j's Query API changelog dates
+// to the 2025.11 calendar release. A self-managed classic release like 5.26
+// predates that and returns 406 Not Acceptable for every request — the
+// server's Query API v2 endpoint works, but not at the media-type version
+// this SDK build insists on. Using a calendar-versioned image here keeps the
+// integration tests both able to pass the version gate at all (as a
+// self-managed image) and wire-compatible with our current SDK pin.
+func createNeo4jContainer(ctx context.Context) (testcontainers.Container, string, string, error) {
 	req := testcontainers.ContainerRequest{
-		Image:        config.GetEnvWithDefault("NEO4J_IMAGE", "neo4j:5.24.2-community"),
-		ExposedPorts: []string{"7687/tcp"},
+		Image:        config.GetEnvWithDefault("NEO4J_IMAGE", "neo4j:2026.07-community"),
+		ExposedPorts: []string{"7687/tcp", "7474/tcp"},
 		Env: map[string]string{
 			"NEO4J_AUTH":        fmt.Sprintf("%s/%s", config.GetEnvWithDefault("NEO4J_USERNAME", "neo4j"), config.GetEnvWithDefault("NEO4J_PASSWORD", "password")),
 			"NEO4JLABS_PLUGINS": config.GetEnvWithDefault("NEO4JLABS_PLUGINS", `["apoc","graph-data-science"]`),
@@ -110,24 +135,30 @@ func createNeo4jContainer(ctx context.Context) (testcontainers.Container, string
 		Started:          true,
 	})
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 
 	host, err := ctr.Host(ctx)
 	if err != nil {
 		_ = ctr.Terminate(ctx)
-		return nil, "", err
+		return nil, "", "", err
 	}
 
 	port, err := ctr.MappedPort(ctx, "7687/tcp")
 	if err != nil {
 		_ = ctr.Terminate(ctx)
-		return nil, "", err
+		return nil, "", "", err
 	}
-
 	boltURI := fmt.Sprintf("bolt://%s:%s", host, port.Port())
 
-	return ctr, boltURI, nil
+	httpPort, err := ctr.MappedPort(ctx, "7474/tcp")
+	if err != nil {
+		_ = ctr.Terminate(ctx)
+		return nil, "", "", err
+	}
+	httpBaseURL := fmt.Sprintf("http://%s:%s", host, httpPort.Port())
+
+	return ctr, boltURI, httpBaseURL, nil
 }
 
 // waitForConnectivity waits for Neo4j connectivity with exponential backoff.
