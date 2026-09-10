@@ -90,34 +90,40 @@ func TestServerLifecycle(t *testing.T) {
 				t.Fatal("the NewNeo4jMCPServer() returned nil")
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-			defer cancel()
-
-			var wg sync.WaitGroup
-			wg.Add(1)
-
-			var startErr error
+			startErrCh := make(chan error, 1)
 			go func() {
-				defer wg.Done()
-				startErr = s.Start()
+				startErrCh <- s.Start()
 			}()
 
-			for {
-				select {
-				case <-ctx.Done():
-					if tc.expectError {
-						if startErr == nil {
-							t.Fatal("expected an error but got nil")
-						}
-					} else {
-						if startErr != nil {
-							t.Fatalf("Start returned an unexpected error: %s", startErr.Error())
-						}
-					}
-					return
-				default:
-					time.Sleep(50 * time.Millisecond)
+			// Start() blocks on verifyRequirements before ever reaching the stdio
+			// serve loop, so an error case resolves as soon as the driver gives up
+			// on the bad host/database — but that failure only surfaces once the
+			// driver's own connection/DNS-resolution timeout elapses, which can
+			// take noticeably longer in a CI network sandbox than on a developer
+			// machine. The happy-path case never returns on its own (it blocks
+			// serving stdio), so its window only needs to be long enough to rule
+			// out an immediate, unexpected failure. Waiting on startErrCh (rather
+			// than polling on a fixed wall-clock deadline) also means the error
+			// cases resolve as soon as Start() actually returns, instead of
+			// always waiting out the full window.
+			wait := 4 * time.Second
+			if tc.expectError {
+				wait = 30 * time.Second
+			}
+
+			select {
+			case startErr := <-startErrCh:
+				if tc.expectError && startErr == nil {
+					t.Fatal("expected an error but got nil")
 				}
+				if !tc.expectError && startErr != nil {
+					t.Fatalf("Start returned an unexpected error: %s", startErr.Error())
+				}
+			case <-time.After(wait):
+				if tc.expectError {
+					t.Fatalf("expected Start() to fail within %s, but it did not return", wait)
+				}
+				// Happy path: Start() is still blocking on the stdio serve loop, as expected.
 			}
 		})
 	}
