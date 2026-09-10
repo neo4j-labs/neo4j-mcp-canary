@@ -216,15 +216,16 @@ to Neo4j — no separate flag is needed:
 - `bolt://`, `bolt+s://`, `neo4j://`, `neo4j+s://`, etc. → the Bolt driver (default, unchanged behaviour).
 - `http://` or `https://` → the [Neo4j Query API](https://neo4j.com/docs/query-api/current/), Neo4j's HTTP-based query interface. Useful for deployments that only expose HTTP or otherwise prefer not to use Bolt.
 
-Query API mode requires Neo4j **5.26** or newer (classic-versioned releases,
-self-managed or Aura alike — the optional `-aura` suffix some Aura servers
-report doesn't affect this floor) or **2026.07** or newer (calendar-versioned
-releases). The calendar-version floor is one release past the Query API's
-own general availability (2026.06): read-cypher's write-query rejection
-depends on the `queryType` field in the query response, which Neo4j only
-introduced in 2026.07 — a 2026.06 server has no reliable signal to classify
-a query as read-only before running it. The server checks the connected
-instance's reported version against this floor at startup (via an
+Query API mode requires Neo4j **2026.07** or newer (calendar-versioned
+releases) or **5.26-aura** or newer (classic-versioned Aura releases only —
+a bare classic version with no `-aura` suffix is not supported, since
+self-managed classic servers predate the typed-JSON media type version this
+server's Query API client depends on). This floor is one release past the
+Query API's own general availability (2026.06): read-cypher's write-query
+rejection depends on the `queryType` field in the query response, which
+Neo4j only introduced in 2026.07 — a 2026.06 server has no reliable signal
+to classify a query as read-only before running it. The server checks the
+connected instance's reported version against this floor at startup (via an
 unauthenticated GET to the base URI) and refuses to start if it's too old,
 with an error naming the version it found and the minimum required.
 
