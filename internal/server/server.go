@@ -390,37 +390,51 @@ func (s *Neo4jMCPServer) configureHooks() *server.Hooks {
 
 	hooks.AddAfterCallTool(s.handleToolCallComplete)
 	if s.config.TransportMode == config.TransportModeHTTP {
+		// The MCP client negotiates either the classic "initialize" handshake or,
+		// when both client and server support it, the newer stateless "discover"
+		// handshake (protocol version 2026-07-28+) — the client picks whichever
+		// succeeds, so the server must run first-request verification on both.
 		hooks.AddBeforeInitialize(func(ctx context.Context, _ any, _ *mcp.InitializeRequest) {
-			// if requirements and events are already verified/sent return
-			if s.connectionVerified.Load() {
-				return
-			}
-			// lock
-			s.initMu.Lock()
-			defer s.initMu.Unlock()
-
-			// cover edge case "connectionVerified" stored in between check and lock
-			if s.connectionVerified.Load() {
-				return
-			}
-
-			slog.Info("Verify server requirements...")
-			if err := s.verifyRequirements(ctx); err != nil {
-				slog.Error("Error during verification", "error", err)
-				return
-			}
-
-			if s.gdsInstalled {
-				s.addGDSTools()
-			}
-
-			s.emitConnectionInitializedEvent(ctx)
-
-			s.connectionVerified.Store(true)
+			s.verifyOnFirstRequest(ctx)
+		})
+		hooks.AddBeforeDiscover(func(ctx context.Context, _ any, _ *mcp.DiscoverRequest) {
+			s.verifyOnFirstRequest(ctx)
 		})
 	}
 
 	return hooks
+}
+
+// verifyOnFirstRequest runs verifyRequirements, conditionally registers GDS
+// tools, and emits the connection-initialized event exactly once, on the
+// first request handled in HTTP mode (initialize or discover).
+func (s *Neo4jMCPServer) verifyOnFirstRequest(ctx context.Context) {
+	// if requirements and events are already verified/sent return
+	if s.connectionVerified.Load() {
+		return
+	}
+	// lock
+	s.initMu.Lock()
+	defer s.initMu.Unlock()
+
+	// cover edge case "connectionVerified" stored in between check and lock
+	if s.connectionVerified.Load() {
+		return
+	}
+
+	slog.Info("Verify server requirements...")
+	if err := s.verifyRequirements(ctx); err != nil {
+		slog.Error("Error during verification", "error", err)
+		return
+	}
+
+	if s.gdsInstalled {
+		s.addGDSTools()
+	}
+
+	s.emitConnectionInitializedEvent(ctx)
+
+	s.connectionVerified.Store(true)
 }
 
 // handleToolCallComplete is called after every tool call completes.
