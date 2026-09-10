@@ -12,7 +12,7 @@ import (
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
 
@@ -44,24 +44,24 @@ const readCypherWriteRedirectMessage = "read-cypher can only run read-only Cyphe
 // releases; the code is stable across versions.
 const neo4jAccessModeErrorCode = "Neo.ClientError.Statement.AccessMode"
 
-func ReadCypherHandler(deps *tools.ToolDependencies) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func ReadCypherHandler(deps *tools.ToolDependencies) func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	return func(ctx context.Context, request *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
 		return handleReadCypher(ctx, request, deps)
 	}
 }
 
-func handleReadCypher(ctx context.Context, request mcp.CallToolRequest, deps *tools.ToolDependencies) (*mcp.CallToolResult, error) {
+func handleReadCypher(ctx context.Context, request *mcpsdk.CallToolRequest, deps *tools.ToolDependencies) (*mcpsdk.CallToolResult, error) {
 	if deps.DBService == nil {
 		errMessage := "Database service is not initialized"
 		slog.Error(errMessage)
-		return mcp.NewToolResultError(errMessage), nil
+		return mcpsdk.NewToolResultError(errMessage), nil
 	}
 
 	var args ReadCypherInput
 
 	if err := request.BindArguments(&args); err != nil {
 		slog.Error("error binding arguments", "error", err)
-		return mcp.NewToolResultError(err.Error()), nil
+		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
 	Query := args.Query
 	Params := args.Params
@@ -72,7 +72,7 @@ func handleReadCypher(ctx context.Context, request mcp.CallToolRequest, deps *to
 	if Query == "" {
 		errMessage := "Query parameter is required and cannot be empty"
 		slog.Error(errMessage)
-		return mcp.NewToolResultError(errMessage), nil
+		return mcpsdk.NewToolResultError(errMessage), nil
 	}
 
 	// Apply the cypher-tool timeout to both classification and execution. This is
@@ -107,7 +107,7 @@ func handleReadCypher(ctx context.Context, request mcp.CallToolRequest, deps *to
 		// runaway-query guard know they don't need it.
 		if errors.Is(err, database.ErrExplainUnsupported) {
 			slog.Info("rejected EXPLAIN query", "query", Query)
-			return mcp.NewToolResultError(
+			return mcpsdk.NewToolResultError(
 				"read-cypher does not surface query plans. Remove the EXPLAIN prefix and retry; " +
 					"runaway-query protection is already provided by the planner-estimate guard " +
 					"(NEO4J_CYPHER_MAX_ESTIMATED_ROWS) and the execution timeout. For a profiled " +
@@ -115,12 +115,12 @@ func handleReadCypher(ctx context.Context, request mcp.CallToolRequest, deps *to
 			), nil
 		}
 		slog.Error("error classifying cypher query", "error", err)
-		return mcp.NewToolResultError(err.Error()), nil
+		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
 
 	if queryType != neo4j.QueryTypeReadOnly { // only queryType == "r" are allowed in read-cypher
 		slog.Error("rejected non-read query", "type", queryType, "query", Query)
-		return mcp.NewToolResultError(readCypherWriteRedirectMessage), nil
+		return mcpsdk.NewToolResultError(readCypherWriteRedirectMessage), nil
 	}
 
 	// EXPLAIN-time estimate guard — the proactive layer above the reactive row cap
@@ -168,7 +168,7 @@ func handleReadCypher(ctx context.Context, request mcp.CallToolRequest, deps *to
 				)
 				slog.Info("rejected query above estimate threshold", "estimated", estimate, "threshold", deps.CypherMaxEstimatedRows, "query", Query)
 				emitCypherEstimateAccuracy(deps, "refused_over_estimate", estimate, 0, false)
-				return mcp.NewToolResultError(errMessage), nil
+				return mcpsdk.NewToolResultError(errMessage), nil
 			}
 		}
 	}
@@ -200,7 +200,7 @@ func handleReadCypher(ctx context.Context, request mcp.CallToolRequest, deps *to
 		var neo4jErr *neo4j.Neo4jError
 		if errors.As(err, &neo4jErr) && neo4jErr.Code == neo4jAccessModeErrorCode {
 			slog.Info("rejected mid-query write via AccessMode guard", "code", neo4jErr.Code, "query", Query)
-			return mcp.NewToolResultError(readCypherWriteRedirectMessage), nil
+			return mcpsdk.NewToolResultError(readCypherWriteRedirectMessage), nil
 		}
 
 		// Classify context errors into user-facing messages that mirror the
@@ -230,13 +230,13 @@ func handleReadCypher(ctx context.Context, request mcp.CallToolRequest, deps *to
 				deps.CypherTimeout,
 			)
 			slog.Info("read-cypher query timed out", "query", Query, "timeout", deps.CypherTimeout)
-			return mcp.NewToolResultError(errMessage), nil
+			return mcpsdk.NewToolResultError(errMessage), nil
 		case errors.Is(err, context.Canceled):
 			slog.Info("read-cypher query cancelled", "query", Query)
-			return mcp.NewToolResultError("read-cypher cancelled: query execution was cancelled before completion"), nil
+			return mcpsdk.NewToolResultError("read-cypher cancelled: query execution was cancelled before completion"), nil
 		}
 		slog.Error("error executing cypher query", "error", err)
-		return mcp.NewToolResultError(err.Error()), nil
+		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
 
 	// Format the streaming result as a JSON envelope that carries both the rows and
@@ -246,12 +246,12 @@ func handleReadCypher(ctx context.Context, request mcp.CallToolRequest, deps *to
 	response, err := deps.DBService.QueryResultToJSON(result)
 	if err != nil {
 		slog.Error("error formatting query results", "error", err)
-		return mcp.NewToolResultError(err.Error()), nil
+		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
 	response, err = tools.EncodeOutput(response, deps.OutputFormat)
 	if err != nil {
 		slog.Error("error encoding query results", "error", err)
-		return mcp.NewToolResultError(err.Error()), nil
+		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
 
 	// Emit the estimate-vs-actual telemetry only when the guard was active — if
@@ -267,7 +267,7 @@ func handleReadCypher(ctx context.Context, request mcp.CallToolRequest, deps *to
 		emitCypherEstimateAccuracy(deps, outcome, estimatedRows, result.RowCount, result.Truncated)
 	}
 
-	return mcp.NewToolResultText(response), nil
+	return mcpsdk.NewToolResultText(response), nil
 }
 
 // emitCypherEstimateAccuracy dispatches a CYPHER_ESTIMATE_ACCURACY event if

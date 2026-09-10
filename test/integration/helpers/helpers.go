@@ -17,10 +17,10 @@ import (
 	analytics "github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics/mocks"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 
 	"github.com/google/uuid"
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"go.uber.org/mock/gomock"
 )
@@ -177,11 +177,11 @@ func (tc *TestContext) GetUniqueLabel(label string) UniqueLabel {
 }
 
 // CallTool invokes an MCP tool and returns the response
-func (tc *TestContext) CallTool(handler func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error), args map[string]any) *mcp.CallToolResult {
+func (tc *TestContext) CallTool(handler func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error), args map[string]any) *mcpsdk.CallToolResult {
 	tc.t.Helper()
 
-	req := mcp.CallToolRequest{
-		Params: mcp.CallToolParams{
+	req := &mcpsdk.CallToolRequest{
+		Params: &mcpsdk.CallToolParams{
 			Arguments: args,
 		},
 	}
@@ -203,12 +203,12 @@ func (tc *TestContext) CallTool(handler func(context.Context, mcp.CallToolReques
 	return res
 }
 
-// Similar to CallTool but returns the error to assert error handlings, if mcp.CallToolResult.isError is false then fails
-func (tc *TestContext) GetToolError(handler func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error), args map[string]any) string {
+// Similar to CallTool but returns the error to assert error handlings, if mcpsdk.CallToolResult.isError is false then fails
+func (tc *TestContext) GetToolError(handler func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error), args map[string]any) string {
 	tc.t.Helper()
 
-	req := mcp.CallToolRequest{
-		Params: mcp.CallToolParams{
+	req := &mcpsdk.CallToolRequest{
+		Params: &mcpsdk.CallToolParams{
 			Arguments: args,
 		},
 	}
@@ -227,7 +227,7 @@ func (tc *TestContext) GetToolError(handler func(context.Context, mcp.CallToolRe
 		return ""
 	}
 
-	textContent, ok := mcp.AsTextContent(res.Content[0])
+	textContent, ok := mcpsdk.AsTextContent(res.Content[0])
 	if !ok {
 		tc.t.Fatalf("expected error as TextContent, got %T", res.Content[0])
 		return ""
@@ -236,14 +236,14 @@ func (tc *TestContext) GetToolError(handler func(context.Context, mcp.CallToolRe
 }
 
 // ParseJSONResponse parses JSON response into the provided interface
-func (tc *TestContext) ParseJSONResponse(res *mcp.CallToolResult, v any) {
+func (tc *TestContext) ParseJSONResponse(res *mcpsdk.CallToolResult, v any) {
 	tc.t.Helper()
 
 	if len(res.Content) == 0 {
 		tc.t.Fatal("response has no content")
 	}
 
-	textContent, ok := mcp.AsTextContent(res.Content[0])
+	textContent, ok := mcpsdk.AsTextContent(res.Content[0])
 	if !ok {
 		tc.t.Fatalf("expected TextContent, got %T", res.Content[0])
 	}
@@ -275,7 +275,7 @@ type CypherEnvelope struct {
 // ParseCypherEnvelope parses the full read-cypher / write-cypher response
 // envelope. Use this when a test needs to inspect truncation flags, row count,
 // the hint text, or any envelope field other than the rows themselves.
-func (tc *TestContext) ParseCypherEnvelope(res *mcp.CallToolResult) CypherEnvelope {
+func (tc *TestContext) ParseCypherEnvelope(res *mcpsdk.CallToolResult) CypherEnvelope {
 	tc.t.Helper()
 	var env CypherEnvelope
 	tc.ParseJSONResponse(res, &env)
@@ -288,20 +288,20 @@ func (tc *TestContext) ParseCypherEnvelope(res *mcp.CallToolResult) CypherEnvelo
 // a bare `var records []map[string]any; ParseJSONResponse(res, &records)`
 // also prevents a recurring bug: that bare pattern tries to unmarshal the
 // envelope object into a slice and fails with a cryptic type-mismatch error.
-func (tc *TestContext) ParseCypherRecords(res *mcp.CallToolResult) []map[string]any {
+func (tc *TestContext) ParseCypherRecords(res *mcpsdk.CallToolResult) []map[string]any {
 	tc.t.Helper()
 	return tc.ParseCypherEnvelope(res).Rows
 }
 
 // ParseTextResponse parses Text response and returns a string
-func (tc *TestContext) ParseTextResponse(res *mcp.CallToolResult) string {
+func (tc *TestContext) ParseTextResponse(res *mcpsdk.CallToolResult) string {
 	tc.t.Helper()
 
 	if len(res.Content) == 0 {
 		tc.t.Fatal("response has no content")
 	}
 
-	textContent, ok := mcp.AsTextContent(res.Content[0])
+	textContent, ok := mcpsdk.AsTextContent(res.Content[0])
 	if !ok {
 		tc.t.Fatalf("expected TextContent, got %T", res.Content[0])
 	}

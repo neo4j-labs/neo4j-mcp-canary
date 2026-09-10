@@ -4,7 +4,7 @@
 package cypher
 
 import (
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 )
 
 // ReadCypherInput is the struct the handler binds incoming arguments into via
@@ -22,8 +22,8 @@ type ReadCypherInput struct {
 
 // ReadCypherSpec declares the MCP tool schema for read-cypher.
 //
-// The schema is declared explicitly with mcp.WithString / mcp.WithObject rather
-// than reflected from ReadCypherInput via mcp.WithInputSchema[T]. The previous
+// The schema is declared explicitly with mcpsdk.WithString / mcpsdk.WithObject rather
+// than reflected from ReadCypherInput via mcpsdk.WithInputSchema[T]. The previous
 // reflection-based approach depended on google/jsonschema-go producing a schema
 // with the expected `properties` and `required` keys for struct-tagged inputs;
 // in the shipping build the advertised tool schema came through to MCP clients
@@ -38,20 +38,20 @@ type ReadCypherInput struct {
 // an auto-filled query would silently kick off a costly full scan, and an
 // empty-object default for `params` risks some client libraries serialising it
 // as the string "{}", which would then fail to unmarshal on the server side.
-func ReadCypherSpec() mcp.Tool {
-	return mcp.NewTool("read-cypher",
-		mcp.WithDescription("read-cypher can run only read-only Cypher statements. For write operations (CREATE, MERGE, DELETE, SET, etc...), schema/admin commands, or PROFILE queries, use write-cypher instead."),
-		mcp.WithString("query",
-			mcp.Required(),
-			mcp.Description("The read-only Cypher query to execute. Required."),
+func ReadCypherSpec() mcpsdk.Tool {
+	return mcpsdk.NewTool("read-cypher",
+		mcpsdk.WithDescription("read-cypher can run only read-only Cypher statements. For write operations (CREATE, MERGE, DELETE, SET, etc...), schema/admin commands, or PROFILE queries, use write-cypher instead."),
+		mcpsdk.WithString("query",
+			mcpsdk.Required(),
+			mcpsdk.Description("The read-only Cypher query to execute. Required."),
 		),
-		mcp.WithObject("params",
-			mcp.Description("Optional parameters to bind to $-placeholders in the query. Must be a JSON object. Omit when the query has no placeholders."),
+		mcpsdk.WithObject("params",
+			mcpsdk.Description("Optional parameters to bind to $-placeholders in the query. Must be a JSON object. Omit when the query has no placeholders."),
 		),
-		mcp.WithTitleAnnotation("Read Cypher"),
-		mcp.WithReadOnlyHintAnnotation(true),
-		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithOpenWorldHintAnnotation(true),
+		mcpsdk.WithTitleAnnotation("Read Cypher"),
+		mcpsdk.WithReadOnlyHintAnnotation(true),
+		mcpsdk.WithDestructiveHintAnnotation(false),
+		mcpsdk.WithIdempotentHintAnnotation(true),
+		mcpsdk.WithOpenWorldHintAnnotation(true),
 	)
 }

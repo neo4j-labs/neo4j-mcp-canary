@@ -9,10 +9,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/neo4j-labs/neo4j-mcp-canary/test/e2e/helpers"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk/mcpsdktest"
 
-	"github.com/mark3labs/mcp-go/client"
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,14 +29,12 @@ func TestServerInitializationE2E(t *testing.T) {
 			"--neo4j-database", cfg.Database,
 		}
 
-		mcpClient, err := client.NewStdioMCPClient(server, []string{}, args...)
-		require.NoError(t, err, "failed to create MCP client")
+		mcpClient := mcpsdktest.NewStdioClient("test-client", "1.0.0", server, args)
 
 		defer mcpClient.Close()
 
 		// Test initialization
-		initRequest := helpers.BuildInitializeRequest()
-		initResponse, err := mcpClient.Initialize(ctx, initRequest)
+		initResponse, err := mcpClient.Initialize(ctx)
 		require.NoError(t, err, "failed to initialize MCP server")
 
 		// Verify server info
@@ -61,14 +57,13 @@ func TestServerInitializationE2E(t *testing.T) {
 			"--neo4j-password", cfg.Password,
 		}
 
-		mcpClient, err := client.NewStdioMCPClient(server, []string{}, args...)
-		require.NoError(t, err, "failed to create MCP client")
+		mcpClient := mcpsdktest.NewStdioClient("test-client", "1.0.0", server, args)
 
 		defer mcpClient.Close()
 
 		// Test should pass as the default database is neo4j
-		initRequest := helpers.BuildInitializeRequest()
-		initResponse, err := mcpClient.Initialize(ctx, initRequest)
+		initResponse, err := mcpClient.Initialize(ctx)
+		_ = err
 		assert.Equal(t, "neo4j-mcp", initResponse.ServerInfo.Name)
 
 	})
@@ -84,20 +79,18 @@ func TestServerInitializationE2E(t *testing.T) {
 			"--neo4j-read-only", "true",
 		}
 
-		mcpClient, err := client.NewStdioMCPClient(server, []string{}, args...)
-		require.NoError(t, err, "failed to create MCP client")
+		mcpClient := mcpsdktest.NewStdioClient("test-client", "1.0.0", server, args)
 
 		defer mcpClient.Close()
 
 		// Test initialization in read-only mode
-		initRequest := helpers.BuildInitializeRequest()
-		initResponse, err := mcpClient.Initialize(ctx, initRequest)
+		initResponse, err := mcpClient.Initialize(ctx)
 		require.NoError(t, err, "failed to initialize MCP server in read-only mode")
 
 		assert.Equal(t, "neo4j-mcp", initResponse.ServerInfo.Name)
 
 		// List tools to verify read-only mode behavior
-		listToolsResponse, err := mcpClient.ListTools(ctx, mcp.ListToolsRequest{})
+		listToolsResponse, err := mcpClient.ListTools(ctx)
 		require.NoError(t, err, "failed to list tools in read-only mode")
 
 		for _, tool := range listToolsResponse.Tools {
@@ -119,18 +112,16 @@ func TestServerInitializationE2E(t *testing.T) {
 			"--neo4j-read-only", "false",
 		}
 
-		mcpClient, err := client.NewStdioMCPClient(server, []string{}, args...)
-		require.NoError(t, err, "failed to create MCP client")
+		mcpClient := mcpsdktest.NewStdioClient("test-client", "1.0.0", server, args)
 
 		defer mcpClient.Close()
 
-		initRequest := helpers.BuildInitializeRequest()
-		initResponse, err := mcpClient.Initialize(ctx, initRequest)
+		initResponse, err := mcpClient.Initialize(ctx)
 		require.NoError(t, err, "failed to initialize MCP server in read-only mode")
 
 		assert.Equal(t, "neo4j-mcp", initResponse.ServerInfo.Name)
 
-		listToolsResponse, err := mcpClient.ListTools(ctx, mcp.ListToolsRequest{})
+		listToolsResponse, err := mcpClient.ListTools(ctx)
 		require.NoError(t, err, "failed to list tools with read-only mode as false")
 		assert.Len(t, listToolsResponse.Tools, 4, "read-only mode false returns the wrong number of tools")
 	})
@@ -145,14 +136,12 @@ func TestServerInitializationE2E(t *testing.T) {
 			"--neo4j-telemetry", "false",
 		}
 
-		mcpClient, err := client.NewStdioMCPClient(server, []string{}, args...)
-		require.NoError(t, err, "failed to create MCP client")
+		mcpClient := mcpsdktest.NewStdioClient("test-client", "1.0.0", server, args)
 
 		defer mcpClient.Close()
 
 		// Test initialization with telemetry disabled
-		initRequest := helpers.BuildInitializeRequest()
-		initResponse, err := mcpClient.Initialize(ctx, initRequest)
+		initResponse, err := mcpClient.Initialize(ctx)
 		require.NoError(t, err, "failed to initialize MCP server with telemetry disabled")
 
 		assert.Equal(t, "neo4j-mcp", initResponse.ServerInfo.Name)
@@ -171,14 +160,12 @@ func TestServerInitializationE2E(t *testing.T) {
 			"--neo4j-schema-sample-size", "50",
 		}
 
-		mcpClient, err := client.NewStdioMCPClient(server, []string{}, args...)
-		require.NoError(t, err, "failed to create MCP client")
+		mcpClient := mcpsdktest.NewStdioClient("test-client", "1.0.0", server, args)
 
 		defer mcpClient.Close()
 
 		// Test initialization with custom schema sample size
-		initRequest := helpers.BuildInitializeRequest()
-		initResponse, err := mcpClient.Initialize(ctx, initRequest)
+		initResponse, err := mcpClient.Initialize(ctx)
 		require.NoError(t, err, "failed to initialize MCP server with custom schema sample size")
 
 		assert.Equal(t, "neo4j-mcp", initResponse.ServerInfo.Name)
@@ -197,14 +184,12 @@ func TestServerInitializationE2E(t *testing.T) {
 			"--neo4j-schema-sample-size", "not-a-number",
 		}
 
-		mcpClient, err := client.NewStdioMCPClient(server, []string{}, args...)
-		require.NoError(t, err, "failed to create MCP client")
+		mcpClient := mcpsdktest.NewStdioClient("test-client", "1.0.0", server, args)
 
 		defer mcpClient.Close()
 
 		// Server should handle invalid schema sample size gracefully (falling back to default)
-		initRequest := helpers.BuildInitializeRequest()
-		initResponse, err := mcpClient.Initialize(ctx, initRequest)
+		initResponse, err := mcpClient.Initialize(ctx)
 		require.NoError(t, err, "failed to initialize MCP server with invalid schema sample size")
 
 		assert.Equal(t, "neo4j-mcp", initResponse.ServerInfo.Name)

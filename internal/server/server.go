@@ -22,10 +22,9 @@ import (
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/queryapi"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
 
@@ -50,7 +49,7 @@ const (
 
 // Neo4jMCPServer represents the MCP server instance
 type Neo4jMCPServer struct {
-	MCPServer          *server.MCPServer
+	mcpServer          *mcpsdk.Server
 	httpServer         *http.Server
 	HTTPServerReady    chan struct{}
 	shutdownChan       chan struct{}
@@ -77,19 +76,22 @@ func NewNeo4jMCPServer(version string, cfg *config.Config, dbService database.Se
 		gdsInstalled:    false,
 	}
 
-	hooks := neo4jServer.configureHooks()
-
-	mcpServer := server.NewMCPServer(
+	neo4jServer.mcpServer = mcpsdk.NewServer(
 		"neo4j-mcp",
 		version,
-		server.WithToolCapabilities(true),
-		server.WithHooks(hooks),
-		server.WithInstructions(mcpServerInstruction),
+		mcpsdk.WithInstructions(mcpServerInstruction),
 	)
 
-	neo4jServer.MCPServer = mcpServer
+	neo4jServer.configureHooks()
 
 	return neo4jServer
+}
+
+// ListTools returns every tool currently registered on the underlying MCP
+// server. Exists so external test code doesn't need direct access to the
+// wrapped mcpsdk.Server.
+func (s *Neo4jMCPServer) ListTools() []mcpsdk.Tool {
+	return s.mcpServer.ListTools()
 }
 
 // Start initializes and starts the MCP server
@@ -122,7 +124,7 @@ func (s *Neo4jMCPServer) Start() error {
 			s.emitServerStartupEvent()
 			s.emitConnectionInitializedEvent(context.Background())
 
-			return server.ServeStdio(s.MCPServer)
+			return s.mcpServer.ServeStdio(context.Background())
 		}
 	default:
 		return fmt.Errorf("unsupported transport mode: %s", s.config.TransportMode)
@@ -311,11 +313,9 @@ func (s *Neo4jMCPServer) StartHTTPServer() error {
 	}
 	slog.Info("Starting HTTP server", "address", addr, "url", fmt.Sprintf("%s://%s", protocol, addr), "tls", s.config.HTTPTLSEnabled)
 
-	// Create the StreamableHTTPServer - it serves on /mcp path by default
-	mcpServerHTTP := server.NewStreamableHTTPServer(
-		s.MCPServer,
-		server.WithStateLess(true),
-	)
+	// Create the streamable-HTTP handler. Path routing (mounting it at /mcp)
+	// is handled by pathValidationMiddleware in the middleware chain below.
+	mcpServerHTTP := s.mcpServer.HTTPHandler(mcpsdk.HTTPOptions{Stateless: true})
 
 	allowedOrigins := parseAllowedOrigins(s.config.HTTPAllowedOrigins)
 	// Wrap handler with middleware and create HTTP server
@@ -385,24 +385,20 @@ func (s *Neo4jMCPServer) StartHTTPServer() error {
 }
 
 // configureHooks sets up MCP SDK hooks for tool call tracking
-func (s *Neo4jMCPServer) configureHooks() *server.Hooks {
-	hooks := &server.Hooks{}
-
-	hooks.AddAfterCallTool(s.handleToolCallComplete)
+func (s *Neo4jMCPServer) configureHooks() {
+	s.mcpServer.OnAfterCallTool(s.handleToolCallComplete)
 	if s.config.TransportMode == config.TransportModeHTTP {
 		// The MCP client negotiates either the classic "initialize" handshake or,
 		// when both client and server support it, the newer stateless "discover"
 		// handshake (protocol version 2026-07-28+) — the client picks whichever
 		// succeeds, so the server must run first-request verification on both.
-		hooks.AddBeforeInitialize(func(ctx context.Context, _ any, _ *mcp.InitializeRequest) {
+		s.mcpServer.OnBeforeInitialize(func(ctx context.Context) {
 			s.verifyOnFirstRequest(ctx)
 		})
-		hooks.AddBeforeDiscover(func(ctx context.Context, _ any, _ *mcp.DiscoverRequest) {
+		s.mcpServer.OnBeforeDiscover(func(ctx context.Context) {
 			s.verifyOnFirstRequest(ctx)
 		})
 	}
-
-	return hooks
 }
 
 // verifyOnFirstRequest runs verifyRequirements, conditionally registers GDS
@@ -438,29 +434,23 @@ func (s *Neo4jMCPServer) verifyOnFirstRequest(ctx context.Context) {
 }
 
 // handleToolCallComplete is called after every tool call completes.
-// The result parameter is typed as `any` to match the OnAfterCallToolFunc signature
-// defined by the mcp-go SDK (v0.46.0+).
-func (s *Neo4jMCPServer) handleToolCallComplete(_ context.Context, _ any, request *mcp.CallToolRequest, result any) {
+func (s *Neo4jMCPServer) handleToolCallComplete(_ context.Context, request *mcpsdk.CallToolRequest, result *mcpsdk.CallToolResult) {
 	if s.anService == nil || !s.anService.IsEnabled() {
 		return
 	}
 
 	toolName := request.Params.Name
 
-	// Determine success from the result. The SDK passes the raw result as `any`;
-	// type-assert to *mcp.CallToolResult to inspect the IsError field.
-	var toolResult *mcp.CallToolResult
 	success := true
-	if tr, ok := result.(*mcp.CallToolResult); ok {
-		toolResult = tr
-		success = !tr.IsError
+	if result != nil {
+		success = !result.IsError
 	}
 
 	// Build vector info based on tool type
 	var vectorInfo *analytics.ToolVectorInfo
 	switch toolName {
 	case "get-schema":
-		vectorInfo = extractSchemaVectorInfo(toolResult)
+		vectorInfo = extractSchemaVectorInfo(result)
 	case "read-cypher", "write-cypher":
 		vectorInfo = extractCypherVectorInfo(request)
 	case "vector-search":
@@ -482,11 +472,11 @@ func (s *Neo4jMCPServer) handleToolCallComplete(_ context.Context, _ any, reques
 // extractSchemaVectorInfo parses the get-schema result to count VECTOR indexes.
 // Returns nil if the result cannot be parsed (graceful degradation — analytics
 // should never break tool execution).
-func extractSchemaVectorInfo(result *mcp.CallToolResult) *analytics.ToolVectorInfo {
+func extractSchemaVectorInfo(result *mcpsdk.CallToolResult) *analytics.ToolVectorInfo {
 	if result == nil || result.IsError || len(result.Content) == 0 {
 		return nil
 	}
-	textContent, ok := result.Content[0].(mcp.TextContent)
+	textContent, ok := mcpsdk.AsTextContent(result.Content[0])
 	if !ok {
 		return nil
 	}
@@ -521,12 +511,8 @@ func extractSchemaVectorInfo(result *mcp.CallToolResult) *analytics.ToolVectorIn
 
 // extractCypherVectorInfo inspects a Cypher query to detect vector search, vector property set,
 // and full-text search operations. Detection is based on well-known procedure names and Cypher patterns.
-func extractCypherVectorInfo(request *mcp.CallToolRequest) *analytics.ToolVectorInfo {
-	args, ok := request.Params.Arguments.(map[string]any)
-	if !ok {
-		return nil
-	}
-	queryRaw, ok := args["query"]
+func extractCypherVectorInfo(request *mcpsdk.CallToolRequest) *analytics.ToolVectorInfo {
+	queryRaw, ok := request.Params.Arguments["query"]
 	if !ok {
 		return nil
 	}
@@ -561,15 +547,8 @@ func extractCypherVectorInfo(request *mcp.CallToolRequest) *analytics.ToolVector
 }
 
 // emitGDSEventsIfNeeded checks if the cypher query contains GDS calls and emits appropriate events
-func (s *Neo4jMCPServer) emitGDSEventsIfNeeded(request *mcp.CallToolRequest) {
-	// Type assert Arguments to map[string]any
-	args, ok := request.Params.Arguments.(map[string]any)
-	if !ok {
-		return
-	}
-
-	// Extract query from arguments
-	queryRaw, ok := args["query"]
+func (s *Neo4jMCPServer) emitGDSEventsIfNeeded(request *mcpsdk.CallToolRequest) {
+	queryRaw, ok := request.Params.Arguments["query"]
 	if !ok {
 		return
 	}

@@ -14,8 +14,8 @@ import (
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/auth"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 	db_mocks "github.com/neo4j-labs/neo4j-mcp-canary/internal/database/mocks"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 
-	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/mock/gomock"
 )
 
@@ -44,10 +44,10 @@ func mockNeo4jMCPServer(t *testing.T) *Neo4jMCPServer {
 	mockDBService := db_mocks.NewMockService(ctrl)
 	mockAnalyticsService := analytics_mocks.NewMockService(ctrl)
 
-	mcpServer := server.NewMCPServer("test-server", "1.0.0")
+	mcpServer := mcpsdk.NewServer("test-server", "1.0.0")
 
 	return &Neo4jMCPServer{
-		MCPServer:    mcpServer,
+		mcpServer:    mcpServer,
 		config:       cfg,
 		dbService:    mockDBService,
 		anService:    mockAnalyticsService,

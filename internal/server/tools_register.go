@@ -6,12 +6,11 @@ package server
 import (
 	"time"
 
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/cypher"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/feedback"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/gds"
-
-	"github.com/mark3labs/mcp-go/server"
 )
 
 // registerTools registers all enabled MCP tools and adds them to the provided MCP server.
@@ -22,7 +21,7 @@ import (
 // is not defined or is set to false, the tool will be added (i.e., only tools with readonly=true are filtered in read-only mode).
 func (s *Neo4jMCPServer) registerTools() error {
 	filteredTools := s.getEnabledTools()
-	s.MCPServer.AddTools(filteredTools...)
+	s.mcpServer.AddTools(filteredTools...)
 	return nil
 }
 
@@ -38,34 +37,16 @@ const (
 
 type ToolDefinition struct {
 	category   toolCategory
-	definition server.ServerTool
+	definition mcpsdk.ServerTool
 	readonly   bool
 }
 
-/*
-func (s *Neo4jMCPServer) addGDSTools() {
-	deps := s.buildToolDependencies()
-	toolDefs := s.getAllToolsDefs(deps)
-	toolDefinition := make([]server.ServerTool, 0)
-	GDSTools := make([]ToolDefinition, 0, len(toolDefs))
-	for _, t := range toolDefs {
-		if t.category == gdsCategory {
-			GDSTools = append(GDSTools, t)
-		}
-	}
-	for _, toolDef := range GDSTools {
-		toolDefinition = append(toolDefinition, toolDef.definition)
-	}
-	s.MCPServer.AddTools(toolDefinition...)
-}
-*/
-
 func (s *Neo4jMCPServer) addGDSTools() {
 	filteredTools := s.getEnabledTools()
-	s.MCPServer.AddTools(filteredTools...)
+	s.mcpServer.AddTools(filteredTools...)
 }
 
-func (s *Neo4jMCPServer) getEnabledTools() []server.ServerTool {
+func (s *Neo4jMCPServer) getEnabledTools() []mcpsdk.ServerTool {
 	filters := make([]toolFilter, 0)
 
 	// If read-only mode is enabled, expose only tools annotated as read-only.
@@ -83,7 +64,7 @@ func (s *Neo4jMCPServer) getEnabledTools() []server.ServerTool {
 	for _, filter := range filters {
 		toolDefs = filter(toolDefs)
 	}
-	enabledTools := make([]server.ServerTool, 0)
+	enabledTools := make([]mcpsdk.ServerTool, 0)
 	for _, toolDef := range toolDefs {
 		enabledTools = append(enabledTools, toolDef.definition)
 	}
@@ -130,7 +111,7 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 	return []ToolDefinition{
 		{
 			category: cypherCategory,
-			definition: server.ServerTool{
+			definition: mcpsdk.ServerTool{
 				Tool:    cypher.GetSchemaSpec(),
 				Handler: cypher.GetSchemaHandler(deps, s.config.SchemaSampleSize),
 			},
@@ -138,7 +119,7 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 		},
 		{
 			category: cypherCategory,
-			definition: server.ServerTool{
+			definition: mcpsdk.ServerTool{
 				Tool:    cypher.ReadCypherSpec(),
 				Handler: cypher.ReadCypherHandler(deps),
 			},
@@ -146,7 +127,7 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 		},
 		{
 			category: cypherCategory,
-			definition: server.ServerTool{
+			definition: mcpsdk.ServerTool{
 				Tool:    cypher.WriteCypherSpec(),
 				Handler: cypher.WriteCypherHandler(deps),
 			},
@@ -155,7 +136,7 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 		// GDS Category/Section
 		{
 			category: gdsCategory,
-			definition: server.ServerTool{
+			definition: mcpsdk.ServerTool{
 				Tool:    gds.ListGDSProceduresSpec(),
 				Handler: gds.ListGdsProceduresHandler(deps),
 			},
@@ -164,7 +145,7 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 		// Feedback Category/Section
 		{
 			category: feedbackCategory,
-			definition: server.ServerTool{
+			definition: mcpsdk.ServerTool{
 				Tool:    feedback.GiveFeedbackSpec(),
 				Handler: feedback.GiveFeedbackHandler(deps),
 			},

@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/cypher"
 
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -207,8 +207,8 @@ func TestBindArgumentsWithReadCypherInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			request := mcp.CallToolRequest{
-				Params: mcp.CallToolParams{
+			request := &mcpsdk.CallToolRequest{
+				Params: &mcpsdk.CallToolParams{
 					Arguments: tt.arguments,
 				},
 			}
@@ -257,8 +257,8 @@ func TestBindArgumentsWithWriteCypherInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			request := mcp.CallToolRequest{
-				Params: mcp.CallToolParams{
+			request := &mcpsdk.CallToolRequest{
+				Params: &mcpsdk.CallToolParams{
 					Arguments: tt.arguments,
 				},
 			}
@@ -273,11 +273,23 @@ func TestBindArgumentsWithWriteCypherInput(t *testing.T) {
 	}
 }
 
+// Note: under mark3labs, mcp.CallToolParams.Arguments was typed `any`, so the
+// two subtests below fed the whole Arguments field a bare string/array to
+// simulate a client sending a non-object payload straight through to
+// BindArguments. mcpsdk.CallToolParams.Arguments is strictly map[string]any —
+// decodeArguments in the SDK adapter (internal/mcpsdk/request_result.go)
+// already rejects a non-object wire payload before any handler is ever
+// invoked, and the Go type system now rejects assigning a string or slice to
+// Arguments at compile time — so that exact top-level shape can no longer be
+// constructed at this layer. We instead trigger the same BindArguments error
+// path via a field-level type mismatch nested inside an otherwise-valid map,
+// which preserves the original intent (BindArguments must surface an error
+// for malformed input) under the new, more precisely-typed API.
 func TestBindArgumentsErrorHandling(t *testing.T) {
-	t.Run("invalid arguments type - string instead of map", func(t *testing.T) {
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
-				Arguments: "invalid string instead of map",
+	t.Run("invalid query field type - number instead of string", func(t *testing.T) {
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
+				Arguments: map[string]any{"query": 12345},
 			},
 		}
 
@@ -287,10 +299,10 @@ func TestBindArgumentsErrorHandling(t *testing.T) {
 		assert.Error(t, err, "should error on invalid argument type")
 	})
 
-	t.Run("invalid arguments type - array instead of map", func(t *testing.T) {
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
-				Arguments: []any{"invalid", "array"},
+	t.Run("invalid query field type - array instead of string", func(t *testing.T) {
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
+				Arguments: map[string]any{"query": []any{"invalid", "array"}},
 			},
 		}
 
@@ -301,8 +313,8 @@ func TestBindArgumentsErrorHandling(t *testing.T) {
 	})
 
 	t.Run("missing query field should have empty query", func(t *testing.T) {
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
 				Arguments: map[string]any{
 					"params": map[string]any{"id": 1},
 				},
@@ -358,8 +370,8 @@ func TestParamsStringifiedRecovery(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			request := mcp.CallToolRequest{
-				Params: mcp.CallToolParams{
+			request := &mcpsdk.CallToolRequest{
+				Params: &mcpsdk.CallToolParams{
 					Arguments: map[string]any{
 						"query":  "MATCH (n) RETURN n",
 						"params": tt.stringVal, // string, simulating the client's double-encoding mistake
@@ -410,8 +422,8 @@ func TestParamsFriendlyError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			request := mcp.CallToolRequest{
-				Params: mcp.CallToolParams{
+			request := &mcpsdk.CallToolRequest{
+				Params: &mcpsdk.CallToolParams{
 					Arguments: map[string]any{
 						"query":  "MATCH (n) RETURN n",
 						"params": tt.paramsVal,
@@ -566,8 +578,8 @@ func TestConvertNumbers(t *testing.T) {
 // TestLimitScenario tests the specific scenario from issue #70
 func TestLimitScenario(t *testing.T) {
 	// This is the exact scenario that was failing before the fix
-	request := mcp.CallToolRequest{
-		Params: mcp.CallToolParams{
+	request := &mcpsdk.CallToolRequest{
+		Params: &mcpsdk.CallToolParams{
 			Arguments: map[string]any{
 				"query":  "MATCH(n) RETURN n LIMIT $limit",
 				"params": map[string]any{"limit": 1},

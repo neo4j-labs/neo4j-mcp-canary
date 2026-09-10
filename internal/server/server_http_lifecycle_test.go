@@ -18,9 +18,7 @@ package server_test
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
-	"net/http"
 	"strconv"
 	"testing"
 	"time"
@@ -28,11 +26,9 @@ import (
 	analytics "github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics/mocks"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 	db "github.com/neo4j-labs/neo4j-mcp-canary/internal/database/mocks"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk/mcpsdktest"
 	server "github.com/neo4j-labs/neo4j-mcp-canary/internal/server"
 
-	"github.com/mark3labs/mcp-go/client"
-	"github.com/mark3labs/mcp-go/client/transport"
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
 )
@@ -94,7 +90,7 @@ func TestNeo4jMCPServerHTTPMode(t *testing.T) {
 		s, errChan := createHTTPServer(t, cfg, mockDB, analyticsService)
 
 		mcpClient := createStreamableHTTPClient(uri)
-		_, err := mcpClient.Initialize(context.Background(), mcp.InitializeRequest{})
+		_, err := mcpClient.Initialize(context.Background())
 		if err != nil {
 			t.Fatalf("error while initialize request: %v", err)
 		}
@@ -111,7 +107,7 @@ func TestNeo4jMCPServerHTTPMode(t *testing.T) {
 		s, errChan := createHTTPServer(t, cfg, mockDB, analyticsService)
 
 		mcpClient := createStreamableHTTPClient(uri)
-		_, err := mcpClient.Initialize(context.Background(), mcp.InitializeRequest{})
+		_, err := mcpClient.Initialize(context.Background())
 		if err != nil {
 			t.Fatalf("error while initialize request: %v", err)
 		}
@@ -130,13 +126,13 @@ func TestNeo4jMCPServerHTTPMode(t *testing.T) {
 		s, errChan := createHTTPServer(t, cfg, mockDB, analyticsService)
 
 		mcpClient := createStreamableHTTPClient(uri)
-		_, err := mcpClient.Initialize(context.Background(), mcp.InitializeRequest{})
+		_, err := mcpClient.Initialize(context.Background())
 		if err != nil {
 			t.Fatalf("error while initialize request: %v", err)
 		}
 		// Create new client to verify that on new requests verifyRequirements is not performed again.
 		mcpClient2 := createStreamableHTTPClient(uri)
-		_, err = mcpClient2.Initialize(context.Background(), mcp.InitializeRequest{})
+		_, err = mcpClient2.Initialize(context.Background())
 		if err != nil {
 			t.Fatalf("error while initialize request: %v", err)
 		}
@@ -152,14 +148,14 @@ func TestNeo4jMCPServerHTTPMode(t *testing.T) {
 		s, errChan := createHTTPServer(t, cfg, mockDB, analyticsService)
 
 		mcpClient := createStreamableHTTPClient(uri)
-		_, err := mcpClient.Initialize(context.Background(), mcp.InitializeRequest{})
+		_, err := mcpClient.Initialize(context.Background())
 		if err != nil {
 			t.Fatalf("error while initialize request: %v", err)
 		}
 
-		toolNames := make([]string, 0, len(s.MCPServer.ListTools()))
-		for _, tool := range s.MCPServer.ListTools() {
-			toolNames = append(toolNames, tool.Tool.Name)
+		toolNames := make([]string, 0, len(s.ListTools()))
+		for _, tool := range s.ListTools() {
+			toolNames = append(toolNames, tool.Name)
 		}
 		assert.Contains(t, toolNames, "list-gds-procedures")
 
@@ -175,14 +171,14 @@ func TestNeo4jMCPServerHTTPMode(t *testing.T) {
 		s, errChan := createHTTPServer(t, cfg, mockDB, analyticsService)
 
 		mcpClient := createStreamableHTTPClient(uri)
-		_, err := mcpClient.Initialize(context.Background(), mcp.InitializeRequest{})
+		_, err := mcpClient.Initialize(context.Background())
 		if err != nil {
 			t.Fatalf("error while initialize request: %v", err)
 		}
 
-		toolNames := make([]string, 0, len(s.MCPServer.ListTools()))
-		for _, tool := range s.MCPServer.ListTools() {
-			toolNames = append(toolNames, tool.Tool.Name)
+		toolNames := make([]string, 0, len(s.ListTools()))
+		for _, tool := range s.ListTools() {
+			toolNames = append(toolNames, tool.Name)
 		}
 		assert.NotContains(t, toolNames, "list-gds-procedures")
 
@@ -190,18 +186,10 @@ func TestNeo4jMCPServerHTTPMode(t *testing.T) {
 	})
 }
 
-func createStreamableHTTPClient(url string) *client.Client {
-	httpTransport, err := transport.NewStreamableHTTP(url,
-		transport.WithHTTPTimeout(30*time.Second),
-		transport.WithHTTPHeaders(map[string]string{
-			"Authorization": "Basic bmVvNGo6cGFzc3dvcmQ=",
-		}),
-		transport.WithHTTPBasicClient(&http.Client{}),
+func createStreamableHTTPClient(url string) *mcpsdktest.Client {
+	return mcpsdktest.NewHTTPClient("test-client", "1.0.0", url,
+		mcpsdktest.WithHTTPHeader("Authorization", "Basic bmVvNGo6cGFzc3dvcmQ="),
 	)
-	if err != nil {
-		log.Fatalf("Failed to create StreamableHTTP transport: %v", err)
-	}
-	return client.NewClient(httpTransport)
 }
 
 func createHTTPServer(t *testing.T, cfg *config.Config, mockDB *db.MockService, analyticsService *analytics.MockService) (*server.Neo4jMCPServer, chan error) {

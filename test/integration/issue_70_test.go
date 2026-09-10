@@ -10,11 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/cypher"
 	"github.com/neo4j-labs/neo4j-mcp-canary/test/integration/helpers"
-
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // https://github.com/neo4j-labs/neo4j-mcp-canary/issues/70
@@ -23,7 +22,7 @@ func TestIssue70(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		handler func(deps *tools.ToolDependencies) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)
+		handler func(deps *tools.ToolDependencies) func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error)
 	}{
 		{
 			name:    "read-cypher",

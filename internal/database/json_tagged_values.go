@@ -35,7 +35,7 @@ import (
 // elementId is the only supported stable identifier, and carrying both
 // invites callers to depend on the wrong one.
 type taggedNode struct {
-	ElementId  string         `json:"elementId"`
+	ElementID  string         `json:"elementId"`
 	Labels     []string       `json:"labels"`
 	Properties map[string]any `json:"properties"`
 }
@@ -45,9 +45,9 @@ type taggedNode struct {
 // StartId / EndId are omitted; startElementId / endElementId are the
 // supported stable identifiers for the endpoints.
 type taggedRelationship struct {
-	ElementId      string         `json:"elementId"`
-	StartElementId string         `json:"startElementId"`
-	EndElementId   string         `json:"endElementId"`
+	ElementID      string         `json:"elementId"`
+	StartElementID string         `json:"startElementId"`
+	EndElementID   string         `json:"endElementId"`
 	Type           string         `json:"type"`
 	Properties     map[string]any `json:"properties"`
 }
@@ -110,15 +110,15 @@ func convertToTagged(v any) any {
 	switch typed := v.(type) {
 	case dbtype.Node:
 		return taggedNode{
-			ElementId:  typed.ElementId,
+			ElementID:  typed.ElementId,
 			Labels:     typed.Labels,
 			Properties: convertMapToTagged(typed.Props),
 		}
 	case dbtype.Relationship:
 		return taggedRelationship{
-			ElementId:      typed.ElementId,
-			StartElementId: typed.StartElementId,
-			EndElementId:   typed.EndElementId,
+			ElementID:      typed.ElementId,
+			StartElementID: typed.StartElementId,
+			EndElementID:   typed.EndElementId,
 			Type:           typed.Type,
 			Properties:     convertMapToTagged(typed.Props),
 		}
