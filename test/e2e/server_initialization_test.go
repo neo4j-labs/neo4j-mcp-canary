@@ -98,7 +98,9 @@ func TestServerInitializationE2E(t *testing.T) {
 				t.Fatal("write-cypher tool found using readonly mode")
 			}
 		}
-		assert.Len(t, listToolsResponse.Tools, 3, "read-only mode true returns the wrong number of tools")
+		// update this number when a tool is added or removed.
+		// Readonly tools: get-schema, read-cypher, list-gds-procedures, give-feedback
+		assert.Len(t, listToolsResponse.Tools, 4, "read-only mode true returns the wrong number of tools")
 	})
 
 	t.Run("initialization with read-only mode disabled", func(t *testing.T) {
@@ -123,7 +125,9 @@ func TestServerInitializationE2E(t *testing.T) {
 
 		listToolsResponse, err := mcpClient.ListTools(ctx)
 		require.NoError(t, err, "failed to list tools with read-only mode as false")
-		assert.Len(t, listToolsResponse.Tools, 4, "read-only mode false returns the wrong number of tools")
+		// update this number when a tool is added or removed.
+		// All tools: get-schema, read-cypher, write-cypher, list-gds-procedures, give-feedback
+		assert.Len(t, listToolsResponse.Tools, 5, "read-only mode false returns the wrong number of tools")
 	})
 	t.Run("initialization with telemetry disabled", func(t *testing.T) {
 		t.Parallel()
