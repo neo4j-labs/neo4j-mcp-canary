@@ -11,10 +11,10 @@ import (
 
 	analytics "github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics/mocks"
 	db "github.com/neo4j-labs/neo4j-mcp-canary/internal/database/mocks"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/cypher"
 
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"go.uber.org/mock/gomock"
 )
@@ -75,12 +75,12 @@ func apocRecord(key, typeName string, props map[string]interface{}, rels map[str
 }
 
 // getResultText extracts the text content from a successful tool result.
-func getResultText(t *testing.T, result *mcp.CallToolResult) string {
+func getResultText(t *testing.T, result *mcpsdk.CallToolResult) string {
 	t.Helper()
 	if result == nil {
 		t.Fatal("result is nil")
 	}
-	textContent, ok := result.Content[0].(mcp.TextContent)
+	textContent, ok := mcpsdk.AsTextContent(result.Content[0])
 	if !ok {
 		t.Fatal("expected result content to be TextContent")
 	}
@@ -135,7 +135,7 @@ func TestGetSchemaHandler_NilDatabaseService(t *testing.T) {
 	}
 
 	handler := cypher.GetSchemaHandler(deps, 100)
-	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	result, err := handler(context.Background(), &mcpsdk.CallToolRequest{})
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestGetSchemaHandler_SchemaQueryFails(t *testing.T) {
 		Return(nil, errors.New("connection refused"))
 
 	handler := cypher.GetSchemaHandler(deps, 100)
-	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	result, err := handler(context.Background(), &mcpsdk.CallToolRequest{})
 	if err != nil {
 		t.Fatalf("expected no error from handler, got: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestGetSchemaHandler_EmptyDatabase(t *testing.T) {
 		Return([]*neo4j.Record{}, nil)
 
 	handler := cypher.GetSchemaHandler(deps, 100)
-	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	result, err := handler(context.Background(), &mcpsdk.CallToolRequest{})
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestGetSchemaHandler_SampleSizeForwardedToAPOC(t *testing.T) {
 		})
 
 	handler := cypher.GetSchemaHandler(deps, 500)
-	if _, err := handler(context.Background(), mcp.CallToolRequest{}); err != nil {
+	if _, err := handler(context.Background(), &mcpsdk.CallToolRequest{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -345,7 +345,7 @@ func TestGetSchemaProcessing(t *testing.T) {
 				Return(tc.records, nil)
 
 			handler := cypher.GetSchemaHandler(deps, 100)
-			result, err := handler(context.Background(), mcp.CallToolRequest{})
+			result, err := handler(context.Background(), &mcpsdk.CallToolRequest{})
 			if err != nil {
 				t.Fatalf("expected no error, got: %v", err)
 			}
@@ -417,7 +417,7 @@ func TestGetSchemaProcessing_InvalidRecordShape(t *testing.T) {
 				Return([]*neo4j.Record{tc.record}, nil)
 
 			handler := cypher.GetSchemaHandler(deps, 100)
-			result, err := handler(context.Background(), mcp.CallToolRequest{})
+			result, err := handler(context.Background(), &mcpsdk.CallToolRequest{})
 			if err != nil {
 				t.Fatalf("expected no error from handler, got: %v", err)
 			}
@@ -467,7 +467,7 @@ func TestGetSchemaProcessing_RealisticGraph(t *testing.T) {
 		Return(records, nil)
 
 	handler := cypher.GetSchemaHandler(deps, 100)
-	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	result, err := handler(context.Background(), &mcpsdk.CallToolRequest{})
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}

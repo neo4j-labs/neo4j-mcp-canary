@@ -10,10 +10,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk/mcpsdktest"
 	"github.com/neo4j-labs/neo4j-mcp-canary/test/e2e/helpers"
-
-	"github.com/mark3labs/mcp-go/client"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 func TestGetSchemaE2E(t *testing.T) {
@@ -29,13 +27,10 @@ func TestGetSchemaE2E(t *testing.T) {
 		"--neo4j-database", cfg.Database,
 	}
 
-	mcpClient, err := client.NewStdioMCPClient(server, []string{}, args...)
-	if err != nil {
-		t.Fatalf("failed to create MCP client: %v", err)
-	}
+	mcpClient := mcpsdktest.NewStdioClient("test-client", "1.0.0", server, args)
 
 	// Initialize the server
-	_, err = mcpClient.Initialize(ctx, helpers.BuildInitializeRequest())
+	_, err := mcpClient.Initialize(ctx)
 	if err != nil {
 		t.Fatalf("failed to initialize MCP server: %v", err)
 	}
@@ -66,17 +61,11 @@ func TestGetSchemaE2E(t *testing.T) {
 		}
 
 		// Call get-schema tool
-		callToolRequest := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
-				Name: "get-schema",
-			},
-		}
-
-		callToolResponse, err := mcpClient.CallTool(ctx, callToolRequest)
+		callToolResponse, err := mcpClient.CallTool(ctx, "get-schema", nil)
 		if err != nil {
 			t.Fatalf("failed to call get-schema tool: %v", err)
 		}
-		textContent, ok := mcp.AsTextContent(callToolResponse.Content[0])
+		textContent, ok := mcpsdktest.AsTextContent(callToolResponse.Content[0])
 		if !ok {
 			t.Fatalf("expected error as TextContent, got %T", callToolResponse.Content[0])
 		}
@@ -153,20 +142,14 @@ func TestGetSchemaE2E(t *testing.T) {
 		}
 
 		// Call get-schema tool
-		callToolRequest := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
-				Name: "get-schema",
-			},
-		}
-
-		callToolResponse, err := mcpClient.CallTool(ctx, callToolRequest)
+		callToolResponse, err := mcpClient.CallTool(ctx, "get-schema", nil)
 		if err != nil {
 			t.Fatalf("failed to call get-schema tool: %v", err)
 		}
 
 		// Verify the tool call was successful
 		if callToolResponse.IsError {
-			textContent, ok := mcp.AsTextContent(callToolResponse.Content[0])
+			textContent, ok := mcpsdktest.AsTextContent(callToolResponse.Content[0])
 			if !ok {
 				t.Fatalf("expected error as TextContent, got %T", callToolResponse.Content[0])
 			}
@@ -177,7 +160,7 @@ func TestGetSchemaE2E(t *testing.T) {
 			t.Fatal("expected get-schema tool to return content, but got none")
 		}
 
-		textContent, ok := mcp.AsTextContent(callToolResponse.Content[0])
+		textContent, ok := mcpsdktest.AsTextContent(callToolResponse.Content[0])
 		if !ok {
 			t.Fatalf("expected content as TextContent, got %T", callToolResponse.Content[0])
 		}

@@ -17,10 +17,12 @@ import (
 	analytics "github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics/mocks"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/queryapi"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 
 	"github.com/google/uuid"
-	"github.com/mark3labs/mcp-go/mcp"
+	query "github.com/neo4j-contrib/query-go-sdk"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"go.uber.org/mock/gomock"
 )
@@ -48,6 +50,49 @@ type TestContext struct {
 func NewTestContext(t *testing.T, driver *neo4j.Driver) *TestContext {
 	t.Helper()
 
+	databaseService, err := database.NewNeo4jService(*driver, "neo4j", config.TransportModeStdio, "test-version")
+	if err != nil {
+		t.Fatalf("failed to create Neo4j service: %v", err)
+	}
+
+	return newTestContextFromService(t, databaseService)
+}
+
+// NewQueryAPITestContext creates a new test context backed by the Query API
+// (Neo4j's HTTP-based query protocol) instead of Bolt, for integration
+// coverage of internal/queryapi.Service against a real server. Mirrors
+// cmd/neo4j-mcp/main.go's newService STDIO-mode construction: one long-lived
+// *query.QueryAPIClient with fixed Basic Auth credentials.
+func NewQueryAPITestContext(t *testing.T, baseURL, username, password, database string) *TestContext {
+	t.Helper()
+
+	client, err := query.NewClient(
+		query.WithBasicAuth(username, password),
+		query.WithBaseURL(baseURL),
+		query.WithDatabase(database),
+		query.WithStreamingSupport(true),
+	)
+	if err != nil {
+		t.Fatalf("failed to create query api client: %v", err)
+	}
+	t.Cleanup(client.Close)
+
+	databaseService, err := queryapi.NewService(queryapi.NewStaticClientFactory(client))
+	if err != nil {
+		t.Fatalf("failed to create query api service: %v", err)
+	}
+
+	return newTestContextFromService(t, databaseService)
+}
+
+// newTestContextFromService builds a TestContext around an already-constructed
+// database.Service, shared by NewTestContext (Bolt) and NewQueryAPITestContext
+// (Query API) — both transports produce the same database.Service interface,
+// so everything past construction (analytics mock, cleanup, dependencies) is
+// identical.
+func newTestContextFromService(t *testing.T, databaseService database.Service) *TestContext {
+	t.Helper()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	testID := makeTestID()
 
@@ -62,11 +107,6 @@ func NewTestContext(t *testing.T, driver *neo4j.Driver) *TestContext {
 		tc.Cleanup() // Clean up test data
 		cancel()     // Release context resources immediately
 	})
-
-	databaseService, err := database.NewNeo4jService(*driver, "neo4j", config.TransportModeStdio, "test-version")
-	if err != nil {
-		t.Fatalf("failed to create Neo4j service: %v", err)
-	}
 
 	analyticsService := getAnalyticsMock(t)
 	deps := &tools.ToolDependencies{
@@ -177,11 +217,11 @@ func (tc *TestContext) GetUniqueLabel(label string) UniqueLabel {
 }
 
 // CallTool invokes an MCP tool and returns the response
-func (tc *TestContext) CallTool(handler func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error), args map[string]any) *mcp.CallToolResult {
+func (tc *TestContext) CallTool(handler func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error), args map[string]any) *mcpsdk.CallToolResult {
 	tc.t.Helper()
 
-	req := mcp.CallToolRequest{
-		Params: mcp.CallToolParams{
+	req := &mcpsdk.CallToolRequest{
+		Params: &mcpsdk.CallToolParams{
 			Arguments: args,
 		},
 	}
@@ -203,12 +243,12 @@ func (tc *TestContext) CallTool(handler func(context.Context, mcp.CallToolReques
 	return res
 }
 
-// Similar to CallTool but returns the error to assert error handlings, if mcp.CallToolResult.isError is false then fails
-func (tc *TestContext) GetToolError(handler func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error), args map[string]any) string {
+// Similar to CallTool but returns the error to assert error handlings, if mcpsdk.CallToolResult.isError is false then fails
+func (tc *TestContext) GetToolError(handler func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error), args map[string]any) string {
 	tc.t.Helper()
 
-	req := mcp.CallToolRequest{
-		Params: mcp.CallToolParams{
+	req := &mcpsdk.CallToolRequest{
+		Params: &mcpsdk.CallToolParams{
 			Arguments: args,
 		},
 	}
@@ -227,7 +267,7 @@ func (tc *TestContext) GetToolError(handler func(context.Context, mcp.CallToolRe
 		return ""
 	}
 
-	textContent, ok := mcp.AsTextContent(res.Content[0])
+	textContent, ok := mcpsdk.AsTextContent(res.Content[0])
 	if !ok {
 		tc.t.Fatalf("expected error as TextContent, got %T", res.Content[0])
 		return ""
@@ -236,14 +276,14 @@ func (tc *TestContext) GetToolError(handler func(context.Context, mcp.CallToolRe
 }
 
 // ParseJSONResponse parses JSON response into the provided interface
-func (tc *TestContext) ParseJSONResponse(res *mcp.CallToolResult, v any) {
+func (tc *TestContext) ParseJSONResponse(res *mcpsdk.CallToolResult, v any) {
 	tc.t.Helper()
 
 	if len(res.Content) == 0 {
 		tc.t.Fatal("response has no content")
 	}
 
-	textContent, ok := mcp.AsTextContent(res.Content[0])
+	textContent, ok := mcpsdk.AsTextContent(res.Content[0])
 	if !ok {
 		tc.t.Fatalf("expected TextContent, got %T", res.Content[0])
 	}
@@ -275,7 +315,7 @@ type CypherEnvelope struct {
 // ParseCypherEnvelope parses the full read-cypher / write-cypher response
 // envelope. Use this when a test needs to inspect truncation flags, row count,
 // the hint text, or any envelope field other than the rows themselves.
-func (tc *TestContext) ParseCypherEnvelope(res *mcp.CallToolResult) CypherEnvelope {
+func (tc *TestContext) ParseCypherEnvelope(res *mcpsdk.CallToolResult) CypherEnvelope {
 	tc.t.Helper()
 	var env CypherEnvelope
 	tc.ParseJSONResponse(res, &env)
@@ -288,20 +328,20 @@ func (tc *TestContext) ParseCypherEnvelope(res *mcp.CallToolResult) CypherEnvelo
 // a bare `var records []map[string]any; ParseJSONResponse(res, &records)`
 // also prevents a recurring bug: that bare pattern tries to unmarshal the
 // envelope object into a slice and fails with a cryptic type-mismatch error.
-func (tc *TestContext) ParseCypherRecords(res *mcp.CallToolResult) []map[string]any {
+func (tc *TestContext) ParseCypherRecords(res *mcpsdk.CallToolResult) []map[string]any {
 	tc.t.Helper()
 	return tc.ParseCypherEnvelope(res).Rows
 }
 
 // ParseTextResponse parses Text response and returns a string
-func (tc *TestContext) ParseTextResponse(res *mcp.CallToolResult) string {
+func (tc *TestContext) ParseTextResponse(res *mcpsdk.CallToolResult) string {
 	tc.t.Helper()
 
 	if len(res.Content) == 0 {
 		tc.t.Fatal("response has no content")
 	}
 
-	textContent, ok := mcp.AsTextContent(res.Content[0])
+	textContent, ok := mcpsdk.AsTextContent(res.Content[0])
 	if !ok {
 		tc.t.Fatalf("expected TextContent, got %T", res.Content[0])
 	}

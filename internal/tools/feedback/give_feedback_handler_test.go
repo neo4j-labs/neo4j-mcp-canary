@@ -10,16 +10,16 @@ import (
 
 	analytics "github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics"
 	amocks "github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics/mocks"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/feedback"
 
-	"github.com/mark3labs/mcp-go/mcp"
 	"go.uber.org/mock/gomock"
 )
 
-func requestWithFeedback(text string) mcp.CallToolRequest {
-	return mcp.CallToolRequest{
-		Params: mcp.CallToolParams{
+func requestWithFeedback(text string) *mcpsdk.CallToolRequest {
+	return &mcpsdk.CallToolRequest{
+		Params: &mcpsdk.CallToolParams{
 			Arguments: map[string]any{"feedback": text},
 		},
 	}

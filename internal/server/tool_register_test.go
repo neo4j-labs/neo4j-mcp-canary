@@ -46,7 +46,7 @@ func TestToolRegister(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Start() failed: %v", err)
 		}
-		registeredTools := len(s.MCPServer.ListTools())
+		registeredTools := len(s.ListTools())
 
 		if expectedTotalToolsCount != registeredTools {
 			t.Errorf("Expected %d tools, but test configuration shows %d", expectedTotalToolsCount, registeredTools)
@@ -75,7 +75,7 @@ func TestToolRegister(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Start() failed: %v", err)
 		}
-		registeredTools := len(s.MCPServer.ListTools())
+		registeredTools := len(s.ListTools())
 
 		if expectedTotalToolsCount != registeredTools {
 			t.Errorf("Expected %d tools, but test configuration shows %d", expectedTotalToolsCount, registeredTools)
@@ -104,7 +104,7 @@ func TestToolRegister(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Start() failed: %v", err)
 		}
-		registeredTools := len(s.MCPServer.ListTools())
+		registeredTools := len(s.ListTools())
 
 		if expectedTotalToolsCount != registeredTools {
 			t.Errorf("Expected %d tools, but test configuration shows %d", expectedTotalToolsCount, registeredTools)
@@ -133,7 +133,7 @@ func TestToolRegister(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Start() failed: %v", err)
 		}
-		registeredTools := len(s.MCPServer.ListTools())
+		registeredTools := len(s.ListTools())
 
 		if expectedTotalToolsCount != registeredTools {
 			t.Errorf("Expected %d tools, but test configuration shows %d", expectedTotalToolsCount, registeredTools)

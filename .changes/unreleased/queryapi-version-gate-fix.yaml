@@ -1,0 +1,9 @@
+kind: Fixed
+body: >-
+  Lowered the Query API version gate's classic-Aura floor (CheckMinimumVersion)
+  from 5.27-aura to 5.26-aura. Classic-versioned Aura releases at or above
+  5.26-aura are now accepted; the "-aura" suffix is still required — a bare
+  classic version with no suffix is rejected regardless of how new it is,
+  since self-managed classic servers predate the typed-JSON media type
+  version this server's Query API client depends on and can't actually serve
+  Query API requests successfully.
