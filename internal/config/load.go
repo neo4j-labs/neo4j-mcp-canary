@@ -58,6 +58,19 @@ func LoadConfig(overrides CLIOverrides) (*Config, error) {
 	}
 	cfg.AuthHeaderName = headName
 
+	// Normalize and validate the tool-selection header names.
+	toolsHeaderName := strings.TrimSpace(cfg.HTTPToolsHeaderName)
+	if toolsHeaderName == "" {
+		return nil, fmt.Errorf("invalid tools header name: explicitly configured header name cannot be empty; unset NEO4J_MCP_HTTP_TOOLS_HEADER_NAME or provide a valid header name")
+	}
+	cfg.HTTPToolsHeaderName = toolsHeaderName
+
+	toolCategoriesHeaderName := strings.TrimSpace(cfg.HTTPToolCategoriesHeaderName)
+	if toolCategoriesHeaderName == "" {
+		return nil, fmt.Errorf("invalid tool categories header name: explicitly configured header name cannot be empty; unset NEO4J_MCP_HTTP_TOOL_CATEGORIES_HEADER_NAME or provide a valid header name")
+	}
+	cfg.HTTPToolCategoriesHeaderName = toolCategoriesHeaderName
+
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}

@@ -162,6 +162,8 @@ When using HTTP transport, enable TLS for secure communication via the variables
 | `NEO4J_MCP_HTTP_TLS_KEY_FILE`   | `--neo4j-http-tls-key-file`    | —                                        | Path to TLS private key (required w/ TLS) |
 | `NEO4J_MCP_HTTP_PORT`           | `--neo4j-http-port`            | `443` with TLS, `80` without             | HTTP server port                          |
 | `NEO4J_HTTP_AUTH_HEADER_NAME`   | `--neo4j-http-auth-header-name`| `Authorization`                          | Header name to read credentials from      |
+| `NEO4J_MCP_HTTP_TOOLS_HEADER_NAME` | `--neo4j-mcp-http-tools-header-name` | `X-MCP-Tools`                  | Header a client uses to select tools by name for one request |
+| `NEO4J_MCP_HTTP_TOOL_CATEGORIES_HEADER_NAME` | `--neo4j-mcp-http-tool-categories-header-name` | `X-MCP-Tool-Categories` | Header a client uses to select tools by category for one request |
 
 **Security Configuration**
 
@@ -194,19 +196,21 @@ The `neo4j-mcp-canary` server is configured via environment variables, CLI flags
 
 Core connection and behaviour:
 
-| Environment Variable              | Default   | Purpose                                                                  |
-| --------------------------------- | --------- | ------------------------------------------------------------------------ |
-| `NEO4J_URI`                       | —         | Neo4j connection URI (required)                                          |
-| `NEO4J_USERNAME`                  | —         | Database username (required in STDIO mode; must be unset in HTTP mode)   |
-| `NEO4J_PASSWORD`                  | —         | Database password (required in STDIO mode; must be unset in HTTP mode)   |
-| `NEO4J_DATABASE`                  | `neo4j`   | Database name                                                            |
-| `NEO4J_READ_ONLY`                 | `false`   | When `true`, the `write-cypher` tool is not registered                   |
-| `NEO4J_TELEMETRY`                 | `true`    | Enable/disable anonymous telemetry                                       |
-| `NEO4J_SCHEMA_SAMPLE_SIZE`        | `1000`    | Nodes per label APOC examines when inferring schema                      |
-| `NEO4J_LOG_LEVEL`                 | `info`    | `debug`, `info`, `notice`, `warning`, `error`, `critical`, `alert`, `emergency` |
-| `NEO4J_LOG_FORMAT`                | `text`    | `text` or `json`                                                         |
-| `NEO4J_OUTPUT_FORMAT`             | `json`    | Tool response format sent to the LLM client: `json` or `toon`           |
-| `NEO4J_TRANSPORT_MODE`            | `stdio`   | `stdio` or `http` (supersedes the deprecated `NEO4J_MCP_TRANSPORT`)      |
+| Environment Variable                | Default   | Purpose                                                                        |
+| ------------------------------------ | --------- | ------------------------------------------------------------------------------ |
+| `NEO4J_URI`                          | —         | Neo4j connection URI (required)                                                |
+| `NEO4J_USERNAME`                     | —         | Database username (required in STDIO mode; must be unset in HTTP mode)        |
+| `NEO4J_PASSWORD`                     | —         | Database password (required in STDIO mode; must be unset in HTTP mode)        |
+| `NEO4J_DATABASE`                     | `neo4j`   | Database name                                                                  |
+| `NEO4J_READ_ONLY`                    | `false`   | When `true`, the `write-cypher` tool is not registered                        |
+| `NEO4J_MCP_ENABLED_TOOLS`            | _(all)_   | Comma-separated tool names to enable; empty enables every tool                |
+| `NEO4J_MCP_ENABLED_TOOL_CATEGORIES`  | _(all)_   | Comma-separated categories (`cypher`, `gds`, `feedback`) to enable             |
+| `NEO4J_TELEMETRY`                    | `true`    | Enable/disable anonymous telemetry                                            |
+| `NEO4J_SCHEMA_SAMPLE_SIZE`           | `1000`    | Nodes per label APOC examines when inferring schema                           |
+| `NEO4J_LOG_LEVEL`                    | `info`    | `debug`, `info`, `notice`, `warning`, `error`, `critical`, `alert`, `emergency` |
+| `NEO4J_LOG_FORMAT`                   | `text`    | `text` or `json`                                                               |
+| `NEO4J_OUTPUT_FORMAT`                | `json`    | Tool response format sent to the LLM client: `json` or `toon`                 |
+| `NEO4J_TRANSPORT_MODE`               | `stdio`   | `stdio` or `http` (supersedes the deprecated `NEO4J_MCP_TRANSPORT`)            |
 
 #### Connecting via the Query API instead of Bolt
 
@@ -268,6 +272,8 @@ Available flags:
 - `--neo4j-password` — overrides `NEO4J_PASSWORD`
 - `--neo4j-database` — overrides `NEO4J_DATABASE`
 - `--neo4j-read-only` — overrides `NEO4J_READ_ONLY` (`true` / `false`)
+- `--neo4j-mcp-enabled-tools` — overrides `NEO4J_MCP_ENABLED_TOOLS` (comma-separated tool names)
+- `--neo4j-mcp-enabled-tool-categories` — overrides `NEO4J_MCP_ENABLED_TOOL_CATEGORIES` (comma-separated categories)
 - `--neo4j-telemetry` — overrides `NEO4J_TELEMETRY` (`true` / `false`)
 - `--neo4j-schema-sample-size` — overrides `NEO4J_SCHEMA_SAMPLE_SIZE`
 - `--neo4j-output-format` — overrides `NEO4J_OUTPUT_FORMAT` (`json` / `toon`)
@@ -289,6 +295,8 @@ Available flags:
 - `--neo4j-http-tls-cert-file` — overrides `NEO4J_MCP_HTTP_TLS_CERT_FILE`
 - `--neo4j-http-tls-key-file` — overrides `NEO4J_MCP_HTTP_TLS_KEY_FILE`
 - `--neo4j-http-auth-header-name` — overrides `NEO4J_HTTP_AUTH_HEADER_NAME`
+- `--neo4j-mcp-http-tools-header-name` — overrides `NEO4J_MCP_HTTP_TOOLS_HEADER_NAME`
+- `--neo4j-mcp-http-tool-categories-header-name` — overrides `NEO4J_MCP_HTTP_TOOL_CATEGORIES_HEADER_NAME`
 - `--neo4j-http-allow-unauthenticated-ping` — overrides `NEO4J_HTTP_ALLOW_UNAUTHENTICATED_PING`
 - `--neo4j-http-allow-unauthenticated-tools-list` — overrides `NEO4J_HTTP_ALLOW_UNAUTHENTICATED_TOOLS_LIST`
 - `--neo4j-http-allow-unauthenticated-initialize` — overrides `NEO4J_HTTP_ALLOW_UNAUTHENTICATED_INITIALIZE`
@@ -446,13 +454,39 @@ To configure MCP clients (VSCode, Claude Desktop, etc.) to use the Neo4j MCP Can
 
 Provided tools:
 
-| Tool                  | ReadOnly | Purpose                                              | Notes                                                                                                                          |
-| --------------------- | -------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `get-schema`          | `true`   | Introspect labels, relationship types, property keys | Uses `apoc.meta.schema`. Sampling controlled by `NEO4J_SCHEMA_SAMPLE_SIZE`.                                                    |
-| `read-cypher`         | `true`   | Execute arbitrary read-only Cypher                   | Rejects writes, schema/admin DDL, `EXPLAIN`, and `PROFILE`. See [Cypher Execution Safeguards](#cypher-execution-safeguards).   |
-| `write-cypher`        | `false`  | Execute arbitrary Cypher (write mode)                | **Caution:** LLM-generated queries can cause harm. Use only in development environments. Not registered when `NEO4J_READ_ONLY=true`. |
-| `list-gds-procedures` | `true`   | List GDS procedures available in the Neo4j instance  | Disabled automatically if GDS is not installed.                                                                                |
-| `give-feedback`       | `true`   | Submit free-text feedback about the MCP server itself | For feedback on the server (tools, behaviour, docs), not on Cypher/database issues. Limited to 300 characters. See [Feedback](#feedback). |
+| Tool                  | Category   | ReadOnly | Purpose                                              | Notes                                                                                                                          |
+| --------------------- | ---------- | -------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `get-schema`          | `cypher`   | `true`   | Introspect labels, relationship types, property keys | Uses `apoc.meta.schema`. Sampling controlled by `NEO4J_SCHEMA_SAMPLE_SIZE`.                                                    |
+| `read-cypher`         | `cypher`   | `true`   | Execute arbitrary read-only Cypher                   | Rejects writes, schema/admin DDL, `EXPLAIN`, and `PROFILE`. See [Cypher Execution Safeguards](#cypher-execution-safeguards).   |
+| `write-cypher`        | `cypher`   | `false`  | Execute arbitrary Cypher (write mode)                | **Caution:** LLM-generated queries can cause harm. Use only in development environments. Not registered when `NEO4J_READ_ONLY=true`. |
+| `list-gds-procedures` | `gds`      | `true`   | List GDS procedures available in the Neo4j instance  | Disabled automatically if GDS is not installed.                                                                                |
+| `give-feedback`       | `feedback` | `true`   | Submit free-text feedback about the MCP server itself | For feedback on the server (tools, behaviour, docs), not on Cypher/database issues. Limited to 300 characters. See [Feedback](#feedback). |
+
+### Selecting which tools are exposed
+
+Every tool belongs to exactly one category (`cypher`, `gds`, or `feedback`, per the table above) and carries a label — its MCP title annotation (e.g. "Read Cypher"), shown to clients that display a friendly tool name.
+
+Tool selection can be narrowed in two ways, which combine with the existing `NEO4J_READ_ONLY`/GDS-availability filtering (a selection can only narrow the set further, never re-enable a tool those filters already excluded):
+
+**Statically, at startup**, via `NEO4J_MCP_ENABLED_TOOLS` and/or `NEO4J_MCP_ENABLED_TOOL_CATEGORIES` (comma-separated; a tool is kept if it matches either list — see [Configuration Options](#configuration-options)):
+
+```bash
+# Only expose the two Cypher read tools:
+export NEO4J_MCP_ENABLED_TOOLS="read-cypher,get-schema"
+
+# Only expose the cypher category (equivalent to the above plus write-cypher):
+export NEO4J_MCP_ENABLED_TOOL_CATEGORIES="cypher"
+```
+
+**Per-request, in HTTP mode**, via the `X-MCP-Tools` and `X-MCP-Tool-Categories` headers (names configurable via `NEO4J_MCP_HTTP_TOOLS_HEADER_NAME` / `NEO4J_MCP_HTTP_TOOL_CATEGORIES_HEADER_NAME`). A request that omits both headers sees the full statically-enabled tool set as usual; a request that sets either header sees only the matching tools for that single request, and calling an excluded tool fails the same way calling a nonexistent one would:
+
+```bash
+curl -X POST https://your-server/mcp \
+  -H "Authorization: Basic <credentials>" \
+  -H "X-MCP-Tool-Categories: gds" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
 
 ### Read-only mode flag
 

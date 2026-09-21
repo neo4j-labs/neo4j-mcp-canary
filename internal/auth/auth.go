@@ -8,9 +8,11 @@ import "context"
 type contextKey string
 
 const (
-	basicAuthUserKey contextKey = "basicAuthUser"
-	basicAuthPassKey contextKey = "basicAuthPass"
-	bearerTokenKey   contextKey = "bearerToken"
+	basicAuthUserKey           contextKey = "basicAuthUser"
+	basicAuthPassKey           contextKey = "basicAuthPass"
+	bearerTokenKey             contextKey = "bearerToken"
+	toolSelectionNamesKey      contextKey = "toolSelectionNames"
+	toolSelectionCategoriesKey contextKey = "toolSelectionCategories"
 )
 
 // WithBasicAuth adds basic auth credentials to the context
@@ -43,4 +45,23 @@ func HasAuth(ctx context.Context) bool {
 	_, _, okBasic := GetBasicAuthCredentials(ctx)
 	_, okBearer := GetBearerToken(ctx)
 	return okBasic || okBearer
+}
+
+// WithToolSelection adds a per-request tool selection (by name and/or
+// category, as read from HTTP headers) to the context. Either slice may be
+// empty; GetToolSelection reports ok=false only when this was never called
+// for the request at all.
+func WithToolSelection(ctx context.Context, names, categories []string) context.Context {
+	ctx = context.WithValue(ctx, toolSelectionNamesKey, names)
+	ctx = context.WithValue(ctx, toolSelectionCategoriesKey, categories)
+	return ctx
+}
+
+// GetToolSelection retrieves the per-request tool selection from the
+// context. ok is false if WithToolSelection was never called for this
+// request (e.g. stdio mode, or neither selection header was present).
+func GetToolSelection(ctx context.Context) (names, categories []string, ok bool) {
+	names, okNames := ctx.Value(toolSelectionNamesKey).([]string)
+	categories, okCategories := ctx.Value(toolSelectionCategoriesKey).([]string)
+	return names, categories, okNames && okCategories
 }

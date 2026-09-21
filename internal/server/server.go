@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/auth"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
@@ -148,6 +150,23 @@ func parseAllowedOrigins(allowedOriginsStr string) []string {
 	}
 
 	return allowedOrigins
+}
+
+// parseCommaList splits a comma-separated string into trimmed, non-empty
+// entries. An empty input yields an empty (non-nil) slice. Used for both the
+// static tool-selection config fields and their HTTP header counterparts.
+func parseCommaList(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 // verifyRequirements check the Neo4j requirements:
@@ -398,7 +417,32 @@ func (s *Neo4jMCPServer) configureHooks() {
 		s.mcpServer.OnBeforeDiscover(func(ctx context.Context) {
 			s.verifyOnFirstRequest(ctx)
 		})
+		s.mcpServer.SetToolAccessFilter(s.toolAccessFilter)
 	}
+}
+
+// toolAccessFilter implements mcpsdk.ToolAccessFunc: it reads the per-request
+// tool selection (populated by toolSelectionMiddleware from the
+// HTTPToolsHeaderName/HTTPToolCategoriesHeaderName headers) and, if either
+// was set, resolves it to the concrete set of tool names allowed for this
+// request. Because it only ever selects from tools already registered on
+// the server (narrowed by ReadOnly/GDS-availability/EnabledTools/
+// EnabledToolCategories), a request can only narrow the visible tool set
+// further, never widen it.
+func (s *Neo4jMCPServer) toolAccessFilter(ctx context.Context) (map[string]bool, bool) {
+	names, categories, ok := auth.GetToolSelection(ctx)
+	if !ok || (len(names) == 0 && len(categories) == 0) {
+		return nil, false
+	}
+
+	deps := s.buildToolDependencies()
+	allowed := make(map[string]bool)
+	for _, d := range s.getAllToolsDefs(deps) {
+		if slices.Contains(names, d.definition.Tool.Name) || slices.Contains(categories, string(d.Category)) {
+			allowed[d.definition.Tool.Name] = true
+		}
+	}
+	return allowed, true
 }
 
 // verifyOnFirstRequest runs verifyRequirements, conditionally registers GDS

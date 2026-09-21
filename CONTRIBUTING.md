@@ -10,7 +10,7 @@ Please read and follow these guidelines to ensure a welcoming environment for ev
 
 ## Prerequisites
 
-- Go 1.25+ (see `go.mod`)
+- Go 1.26+ (see `go.mod`)
 - A Neo4j instance with APOC plugin installed.
 
 ## Clone the repository (forks are currently disabled)
@@ -288,9 +288,15 @@ This guide includes:
 
 MCP error handling follows a specific pattern that differs from standard Go error handling. According to the [MCP specification](https://modelcontextprotocol.io/specification/2025-06-18/server/tools#error-handling), tool handlers should communicate errors through the tool result structure rather than returning Go errors directly.
 
+This codebase never imports an MCP SDK directly outside `internal/mcpsdk` —
+every tool spec/handler goes through that package's re-exported types
+(`mcpsdk.Tool`, `mcpsdk.ServerTool`, `mcpsdk.CallToolRequest`,
+`mcpsdk.CallToolResult`, ...) instead of the underlying SDK's. See the doc
+comment on `internal/mcpsdk`'s package declaration for why.
+
 ### When to use MCP tool result errors vs direct Go errors:
 
-- **Use MCP tool result errors** (`NewToolResultError`) for:
+- **Use MCP tool result errors** (`mcpsdk.NewToolResultError`) for:
 
   - Business logic errors (invalid input, database constraints, etc.)
   - Operational errors that the client should handle gracefully
@@ -303,31 +309,31 @@ MCP error handling follows a specific pattern that differs from standard Go erro
 
 ### Recommended MCP Tool Handler error handling pattern:
 
-When implementing MCP tool handlers, use the `mcp.NewToolResultError` helper function for cleaner error handling:
+When implementing MCP tool handlers, use the `mcpsdk.NewToolResultError` helper function for cleaner error handling:
 
 ```go
-func MyToolHandler(deps *ToolDependencies) mcp.ToolHandler {
-    return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func MyToolHandler(deps *tools.ToolDependencies) mcpsdk.ToolHandlerFunc {
+    return func(ctx context.Context, request *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
         // Bind and validate arguments
         var args MyToolInput
         if err := request.BindArguments(&args); err != nil {
-            return mcp.NewToolResultError("Invalid arguments: " + err.Error()), nil
+            return mcpsdk.NewToolResultError("Invalid arguments: " + err.Error()), nil
         }
 
         // Business logic validation
         if args.SomeField == "" {
-            return mcp.NewToolResultError("SomeField is required"), nil
+            return mcpsdk.NewToolResultError("SomeField is required"), nil
         }
 
         // Execute operation
         result, err := someOperation(ctx, args)
         if err != nil {
             // Use MCP error for business/operational errors
-            return mcp.NewToolResultError("Operation failed: " + err.Error()), nil
+            return mcpsdk.NewToolResultError("Operation failed: " + err.Error()), nil
         }
 
         // Success case
-        return mcp.NewToolResultText(result), nil
+        return mcpsdk.NewToolResultText(result), nil
     }
 }
 ```
@@ -336,47 +342,64 @@ func MyToolHandler(deps *ToolDependencies) mcp.ToolHandler {
 
 ## Adding New MCP Tools
 
-1. **Define tool specifications** in `internal/tools/`:
+1. **Define a tool spec** in `internal/tools/<package>/`. The input schema is
+   declared explicitly via `mcpsdk.WithString`/`WithObject`/etc. rather than
+   reflected from the Go input struct — see the rationale comment atop
+   `internal/tools/cypher/read_cypher_spec.go` if you're wondering why:
 
    ```go
-   func NewMyToolSpec() mcp.Tool {
-       return mcp.NewTool("my-tool",
-           mcp.WithDescription("Tool description"),
-           mcp.WithInputSchema[MyToolInput](),
-           mcp.WithReadOnlyHintAnnotation(true), // This flag will be used filter tools for the read-only mode.
+   func MyToolSpec() mcpsdk.Tool {
+       return mcpsdk.NewTool("my-tool",
+           mcpsdk.WithDescription("Tool description"),
+           mcpsdk.WithString("someField",
+               mcpsdk.Required(),
+               mcpsdk.Description("What this field is for. Required."),
+           ),
+           mcpsdk.WithTitleAnnotation("My Tool"),   // this is the tool's label
+           mcpsdk.WithReadOnlyHintAnnotation(true), // used to filter tools in read-only mode
        )
    }
    ```
 
-   **Note:** WithReadOnlyHintAnnotation marks a tool with a read-only hint is used for filtering.
+   **Note:** `WithReadOnlyHintAnnotation` marks a tool with a read-only hint used for filtering.
    When set to true, the tool will be considered read-only and included when selecting
    tools for read-only mode. If the annotation is not present or set to false,
    the tool is treated as a write-capable tool (i.e., not considered read-only).
 
-2. **Implement tool handler**:
+2. **Implement the tool handler**:
 
    ```go
-   func NewMyToolHandler(deps *ToolDependencies) mcp.ToolHandler {
-       return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+   func MyToolHandler(deps *tools.ToolDependencies) mcpsdk.ToolHandlerFunc {
+       return func(ctx context.Context, request *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
            // Implementation
        }
    }
    ```
 
-3. **Register in tool_register.go, in the right section (cypher/GDS/etc...)**:
+3. **Register it in `internal/server/tools_register.go`**, in
+   `getAllToolsDefs`, under the right category (every tool must belong to
+   exactly one — see `internal/tools/category.go` for the full list):
 
    ```go
    {
-   		category: cypherCategory,
-   		definition: server.ServerTool{
-   			Tool:    cypher.GetSchemaSpec(),
-   			Handler: cypher.GetSchemaHandler(deps),
-   		},
-   		readonly: true,
+       Category: tools.CategoryCypher,
+       definition: mcpsdk.ServerTool{
+           Tool:    cypher.GetSchemaSpec(),
+           Handler: cypher.GetSchemaHandler(deps),
+       },
+       readonly: true,
    },
    ```
 
-4. **Write tests** with mocked dependencies
+   A new tool is automatically covered by the existing
+   `NEO4J_MCP_ENABLED_TOOLS`/`NEO4J_MCP_ENABLED_TOOL_CATEGORIES` selection
+   filters and the HTTP per-request `X-MCP-Tools`/`X-MCP-Tool-Categories`
+   headers — no extra wiring needed for those.
+
+4. **Write tests** with mocked dependencies, and update the expected tool
+   count in `internal/server/tool_register_test.go` (and the corresponding
+   e2e assertions in `test/e2e/`) — both hard-code the current tool count as
+   a regression guard.
 
 ### Database Interface Extensions
 
