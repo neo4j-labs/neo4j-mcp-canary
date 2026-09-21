@@ -4,6 +4,8 @@
 package server
 
 import (
+	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
@@ -19,26 +21,33 @@ import (
 // any tool that performs state mutation will be excluded; only tools annotated as read-only will be registered.
 // Note: this read-only filtering relies on the tool annotation "readonly" (ReadOnlyHint). If the annotation
 // is not defined or is set to false, the tool will be added (i.e., only tools with readonly=true are filtered in read-only mode).
+// Tools can also be statically narrowed by name or category via Config.EnabledTools /
+// Config.EnabledToolCategories — see filterBySelection.
 func (s *Neo4jMCPServer) registerTools() error {
 	filteredTools := s.getEnabledTools()
 	s.mcpServer.AddTools(filteredTools...)
 	return nil
 }
 
-type toolFilter func(tools []ToolDefinition) []ToolDefinition
+type toolFilter func(defs []ToolDefinition) []ToolDefinition
 
-type toolCategory int
-
-const (
-	cypherCategory   toolCategory = 0
-	gdsCategory      toolCategory = 1
-	feedbackCategory toolCategory = 2
-)
-
+// ToolDefinition pairs an mcpsdk.ServerTool with the metadata used to decide
+// whether it's registered: its Category (mandatory — every tool belongs to
+// exactly one) and whether it's readonly.
 type ToolDefinition struct {
-	category   toolCategory
+	Category   tools.Category
 	definition mcpsdk.ServerTool
 	readonly   bool
+}
+
+// Label returns the tool's human-readable label, i.e. its MCP title
+// annotation (see mcpsdk.WithTitleAnnotation), falling back to the tool's
+// wire name if no title annotation was set.
+func (d ToolDefinition) Label() string {
+	if d.definition.Tool.Annotations != nil && d.definition.Tool.Annotations.Title != "" {
+		return d.definition.Tool.Annotations.Title
+	}
+	return d.definition.Tool.Name
 }
 
 func (s *Neo4jMCPServer) addGDSTools() {
@@ -49,6 +58,11 @@ func (s *Neo4jMCPServer) addGDSTools() {
 func (s *Neo4jMCPServer) getEnabledTools() []mcpsdk.ServerTool {
 	filters := make([]toolFilter, 0)
 
+	// Narrow to a caller-selected set of tools/categories first, if configured.
+	names, categories := s.enabledToolSelection()
+	if len(names) > 0 || len(categories) > 0 {
+		filters = append(filters, filterBySelection(names, categories))
+	}
 	// If read-only mode is enabled, expose only tools annotated as read-only.
 	if s.config != nil && s.config.ReadOnly {
 		filters = append(filters, filterWriteTools)
@@ -61,6 +75,8 @@ func (s *Neo4jMCPServer) getEnabledTools() []mcpsdk.ServerTool {
 	deps := s.buildToolDependencies()
 	toolDefs := s.getAllToolsDefs(deps)
 
+	warnOnUnknownSelection(toolDefs, names, categories)
+
 	for _, filter := range filters {
 		toolDefs = filter(toolDefs)
 	}
@@ -71,9 +87,60 @@ func (s *Neo4jMCPServer) getEnabledTools() []mcpsdk.ServerTool {
 	return enabledTools
 }
 
-func filterWriteTools(tools []ToolDefinition) []ToolDefinition {
-	readOnlyTools := make([]ToolDefinition, 0, len(tools))
-	for _, t := range tools {
+// enabledToolSelection parses Config.EnabledTools / Config.EnabledToolCategories
+// into trimmed, comma-separated lists. Either or both may be empty, meaning
+// no restriction on that dimension.
+func (s *Neo4jMCPServer) enabledToolSelection() (names, categories []string) {
+	if s.config == nil {
+		return nil, nil
+	}
+	return parseCommaList(s.config.EnabledTools), parseCommaList(s.config.EnabledToolCategories)
+}
+
+// warnOnUnknownSelection logs a warning for any configured tool name or
+// category that doesn't match a known tool, so a typo is visible in the
+// logs rather than silently disabling nothing.
+func warnOnUnknownSelection(defs []ToolDefinition, names, categories []string) {
+	knownNames := make(map[string]bool, len(defs))
+	knownCategories := make(map[string]bool, len(defs))
+	for _, d := range defs {
+		knownNames[d.definition.Tool.Name] = true
+		knownCategories[string(d.Category)] = true
+	}
+	for _, n := range names {
+		if !knownNames[n] {
+			slog.Warn("NEO4J_MCP_ENABLED_TOOLS contains an unknown tool name", "name", n)
+		}
+	}
+	for _, c := range categories {
+		if !knownCategories[c] {
+			slog.Warn("NEO4J_MCP_ENABLED_TOOL_CATEGORIES contains an unknown category", "category", c)
+		}
+	}
+}
+
+// filterBySelection keeps a tool if it matches either the configured tool
+// names or the configured categories (union semantics — either match is
+// sufficient). It is a no-op (returns defs unchanged) when both names and
+// categories are empty.
+func filterBySelection(names, categories []string) toolFilter {
+	return func(defs []ToolDefinition) []ToolDefinition {
+		if len(names) == 0 && len(categories) == 0 {
+			return defs
+		}
+		selected := make([]ToolDefinition, 0, len(defs))
+		for _, d := range defs {
+			if slices.Contains(names, d.definition.Tool.Name) || slices.Contains(categories, string(d.Category)) {
+				selected = append(selected, d)
+			}
+		}
+		return selected
+	}
+}
+
+func filterWriteTools(defs []ToolDefinition) []ToolDefinition {
+	readOnlyTools := make([]ToolDefinition, 0, len(defs))
+	for _, t := range defs {
 		if t.readonly {
 			readOnlyTools = append(readOnlyTools, t)
 		}
@@ -81,10 +148,10 @@ func filterWriteTools(tools []ToolDefinition) []ToolDefinition {
 	return readOnlyTools
 }
 
-func filterGDSTools(tools []ToolDefinition) []ToolDefinition {
-	nonGDSTools := make([]ToolDefinition, 0, len(tools))
-	for _, t := range tools {
-		if t.category != gdsCategory {
+func filterGDSTools(defs []ToolDefinition) []ToolDefinition {
+	nonGDSTools := make([]ToolDefinition, 0, len(defs))
+	for _, t := range defs {
+		if t.Category != tools.CategoryGDS {
 			nonGDSTools = append(nonGDSTools, t)
 		}
 	}
@@ -110,7 +177,7 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 
 	return []ToolDefinition{
 		{
-			category: cypherCategory,
+			Category: tools.CategoryCypher,
 			definition: mcpsdk.ServerTool{
 				Tool:    cypher.GetSchemaSpec(),
 				Handler: cypher.GetSchemaHandler(deps, s.config.SchemaSampleSize),
@@ -118,7 +185,7 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 			readonly: true,
 		},
 		{
-			category: cypherCategory,
+			Category: tools.CategoryCypher,
 			definition: mcpsdk.ServerTool{
 				Tool:    cypher.ReadCypherSpec(),
 				Handler: cypher.ReadCypherHandler(deps),
@@ -126,7 +193,7 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 			readonly: true,
 		},
 		{
-			category: cypherCategory,
+			Category: tools.CategoryCypher,
 			definition: mcpsdk.ServerTool{
 				Tool:    cypher.WriteCypherSpec(),
 				Handler: cypher.WriteCypherHandler(deps),
@@ -135,7 +202,7 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 		},
 		// GDS Category/Section
 		{
-			category: gdsCategory,
+			Category: tools.CategoryGDS,
 			definition: mcpsdk.ServerTool{
 				Tool:    gds.ListGDSProceduresSpec(),
 				Handler: gds.ListGdsProceduresHandler(deps),
@@ -144,7 +211,7 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 		},
 		// Feedback Category/Section
 		{
-			category: feedbackCategory,
+			Category: tools.CategoryFeedback,
 			definition: mcpsdk.ServerTool{
 				Tool:    feedback.GiveFeedbackSpec(),
 				Handler: feedback.GiveFeedbackHandler(deps),

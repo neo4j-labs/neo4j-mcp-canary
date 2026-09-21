@@ -55,8 +55,13 @@ func (s *Neo4jMCPServer) chainMiddleware(allowedOrigins []string, next http.Hand
 
 	handler = authMiddleware(s.config.AuthHeaderName, unauthMethods, s.anService)(handler)
 
+	// Add per-request tool-selection middleware (reads the tools/categories
+	// headers, if present, into the request context for the server's
+	// ToolAccessFilter to consume).
+	handler = toolSelectionMiddleware(s.config.HTTPToolsHeaderName, s.config.HTTPToolCategoriesHeaderName)(handler)
+
 	// Add CORS middleware (if configured) - includes Mcp-Session-Id in allowed headers
-	handler = corsMiddleware(allowedOrigins, s.config.AuthHeaderName)(handler)
+	handler = corsMiddleware(allowedOrigins, s.config.AuthHeaderName, s.config.HTTPToolsHeaderName, s.config.HTTPToolCategoriesHeaderName)(handler)
 
 	// Add path validation middleware last (executes first - reject non-/mcp paths quickly)
 	handler = pathValidationMiddleware()(handler)
@@ -146,11 +151,27 @@ func authMiddleware(headerName string, unauthenticatedMethods []string, as analy
 	}
 }
 
+// toolSelectionMiddleware reads the tool-name and tool-category selection
+// headers (if present) and stores the parsed values in the request context
+// via auth.WithToolSelection, for the server's mcpsdk.ToolAccessFilter to
+// consume later in the request lifecycle. It never rejects a request —
+// absent or empty headers simply mean no per-request restriction.
+func toolSelectionMiddleware(namesHeader, categoriesHeader string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			names := parseCommaList(r.Header.Get(namesHeader))
+			categories := parseCommaList(r.Header.Get(categoriesHeader))
+			ctx := auth.WithToolSelection(r.Context(), names, categories)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
 // corsMiddleware implements CORS (Cross-Origin Resource Sharing)
 // If allowedOrigins is empty, CORS is disabled
 // If allowedOrigins is "*", all origins are allowed
 // Otherwise, allowedOrigins should be a comma-separated list of allowed origins
-func corsMiddleware(allowedOrigins []string, authHeaderName string) func(http.Handler) http.Handler {
+func corsMiddleware(allowedOrigins []string, authHeaderName string, toolSelectionHeaderNames ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Skip CORS if not configured
@@ -174,6 +195,12 @@ func corsMiddleware(allowedOrigins []string, authHeaderName string) func(http.Ha
 			// If a custom auth header is configured, and it's not the default, include it
 			if authHeaderName != "" && !strings.EqualFold(authHeaderName, "Authorization") {
 				allowedHeaders = append(allowedHeaders, authHeaderName)
+			}
+			// Include the tool-selection headers so browser-based clients can send them.
+			for _, h := range toolSelectionHeaderNames {
+				if h != "" {
+					allowedHeaders = append(allowedHeaders, h)
+				}
 			}
 
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")

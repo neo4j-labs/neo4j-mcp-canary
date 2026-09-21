@@ -94,8 +94,10 @@ type Config struct {
 	Username                                    string
 	Password                                    string // #nosec G117
 	Database                                    string
-	ReadOnly                                    bool // If true, disables write tools
-	Telemetry                                   bool // If false, disables telemetry
+	ReadOnly                                    bool   // If true, disables write tools
+	EnabledTools                                string // Comma-separated list of tool names to enable; empty means no restriction
+	EnabledToolCategories                       string // Comma-separated list of tool categories to enable; empty means no restriction
+	Telemetry                                   bool   // If false, disables telemetry
 	LogLevel                                    string
 	LogFormat                                   string
 	OutputFormat                                OutputFormat // Tool response format sent to the LLM client: "json" (default) or "toon"
@@ -112,6 +114,8 @@ type Config struct {
 	HTTPTLSCertFile                             string        // Path to TLS certificate file (required if HTTPTLSEnabled is true)
 	HTTPTLSKeyFile                              string        // Path to TLS private key file (required if HTTPTLSEnabled is true)
 	AuthHeaderName                              string        // HTTP header name to read auth credentials from (default: "Authorization")
+	HTTPToolsHeaderName                         string        // HTTP header name a client uses to select tools by name for a single request (default: "X-MCP-Tools")
+	HTTPToolCategoriesHeaderName                string        // HTTP header name a client uses to select tools by category for a single request (default: "X-MCP-Tool-Categories")
 	AllowUnauthenticatedPing                    bool          // If true, allows unauthenticated ping health checks in HTTP mode
 	AllowUnauthenticatedToolsList               bool          // If true, allows unauthenticated tools list in HTTP mode
 	AllowUnauthenticatedInitialize              bool          // If true, allows unauthenticated initialize in HTTP mode

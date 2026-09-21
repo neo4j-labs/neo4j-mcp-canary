@@ -103,6 +103,16 @@ var fields = []Field{
 		Setter: func(cfg *Config, raw string) { cfg.ReadOnly = ParseBool(raw, false) },
 	},
 	{
+		Name: "EnabledTools", EnvVar: "NEO4J_MCP_ENABLED_TOOLS", FlagName: "neo4j-mcp-enabled-tools",
+		Placeholder: "NAMES", Description: "Comma-separated list of tool names to enable; empty enables all tools",
+		Setter: func(cfg *Config, raw string) { cfg.EnabledTools = raw },
+	},
+	{
+		Name: "EnabledToolCategories", EnvVar: "NEO4J_MCP_ENABLED_TOOL_CATEGORIES", FlagName: "neo4j-mcp-enabled-tool-categories",
+		Placeholder: "CATEGORIES", Description: "Comma-separated list of tool categories to enable; empty enables all categories",
+		Setter: func(cfg *Config, raw string) { cfg.EnabledToolCategories = raw },
+	},
+	{
 		Name: "Telemetry", EnvVar: "NEO4J_TELEMETRY", FlagName: "neo4j-telemetry",
 		Placeholder: "BOOLEAN", Description: "Enable telemetry: true or false", DefaultDisplay: "true",
 		Setter: func(cfg *Config, raw string) { cfg.Telemetry = ParseBool(raw, true) },
@@ -219,6 +229,21 @@ var fields = []Field{
 		Name: "AuthHeaderName", EnvVar: "NEO4J_HTTP_AUTH_HEADER_NAME", FlagName: "neo4j-http-auth-header-name",
 		Placeholder: "HEADER", Description: "Name of the HTTP header to read auth credentials from", DefaultDisplay: "Authorization",
 		Setter: func(cfg *Config, raw string) { cfg.AuthHeaderName = defaultString(raw, "Authorization") },
+	},
+	{
+		// HTTPToolsHeaderName's default is applied here, but empty-after-trim
+		// validation happens as an explicit post-processing step in LoadConfig,
+		// mirroring AuthHeaderName.
+		Name: "HTTPToolsHeaderName", EnvVar: "NEO4J_MCP_HTTP_TOOLS_HEADER_NAME", FlagName: "neo4j-mcp-http-tools-header-name",
+		Placeholder: "HEADER", Description: "Name of the HTTP header a client uses to select tools by name for a single request", DefaultDisplay: "X-MCP-Tools",
+		Setter: func(cfg *Config, raw string) { cfg.HTTPToolsHeaderName = defaultString(raw, "X-MCP-Tools") },
+	},
+	{
+		Name: "HTTPToolCategoriesHeaderName", EnvVar: "NEO4J_MCP_HTTP_TOOL_CATEGORIES_HEADER_NAME", FlagName: "neo4j-mcp-http-tool-categories-header-name",
+		Placeholder: "HEADER", Description: "Name of the HTTP header a client uses to select tools by category for a single request", DefaultDisplay: "X-MCP-Tool-Categories",
+		Setter: func(cfg *Config, raw string) {
+			cfg.HTTPToolCategoriesHeaderName = defaultString(raw, "X-MCP-Tool-Categories")
+		},
 	},
 	{
 		Name: "AllowUnauthenticatedPing", EnvVar: "NEO4J_HTTP_ALLOW_UNAUTHENTICATED_PING", FlagName: "neo4j-http-allow-unauthenticated-ping",

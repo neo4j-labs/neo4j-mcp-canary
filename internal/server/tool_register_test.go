@@ -12,6 +12,7 @@ import (
 	db "github.com/neo4j-labs/neo4j-mcp-canary/internal/database/mocks"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/server"
 
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
 )
 
@@ -140,6 +141,81 @@ func TestToolRegister(t *testing.T) {
 		}
 	})
 
+	t.Run("should narrow registered tools by name via EnabledTools", func(t *testing.T) {
+		mockDB := getMockedDBService(ctrl, true)
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
+		cfg := &config.Config{
+			URI:           "bolt://test-host:7687",
+			Username:      "neo4j",
+			Password:      "password",
+			Database:      "neo4j",
+			EnabledTools:  "read-cypher, get-schema",
+			TransportMode: config.TransportModeStdio,
+		}
+		s := server.NewNeo4jMCPServer("test-version", cfg, mockDB, aService)
+
+		err := s.Start()
+		if err != nil {
+			t.Fatalf("Start() failed: %v", err)
+		}
+
+		toolNames := make([]string, 0, len(s.ListTools()))
+		for _, tool := range s.ListTools() {
+			toolNames = append(toolNames, tool.Name)
+		}
+		assert.ElementsMatch(t, []string{"read-cypher", "get-schema"}, toolNames)
+	})
+
+	t.Run("should narrow registered tools by category via EnabledToolCategories", func(t *testing.T) {
+		mockDB := getMockedDBService(ctrl, true)
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
+		cfg := &config.Config{
+			URI:                   "bolt://test-host:7687",
+			Username:              "neo4j",
+			Password:              "password",
+			Database:              "neo4j",
+			EnabledToolCategories: "gds",
+			TransportMode:         config.TransportModeStdio,
+		}
+		s := server.NewNeo4jMCPServer("test-version", cfg, mockDB, aService)
+
+		err := s.Start()
+		if err != nil {
+			t.Fatalf("Start() failed: %v", err)
+		}
+
+		toolNames := make([]string, 0, len(s.ListTools()))
+		for _, tool := range s.ListTools() {
+			toolNames = append(toolNames, tool.Name)
+		}
+		assert.ElementsMatch(t, []string{"list-gds-procedures"}, toolNames)
+	})
+
+	t.Run("EnabledTools and EnabledToolCategories combine as a union", func(t *testing.T) {
+		mockDB := getMockedDBService(ctrl, true)
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
+		cfg := &config.Config{
+			URI:                   "bolt://test-host:7687",
+			Username:              "neo4j",
+			Password:              "password",
+			Database:              "neo4j",
+			EnabledTools:          "give-feedback",
+			EnabledToolCategories: "gds",
+			TransportMode:         config.TransportModeStdio,
+		}
+		s := server.NewNeo4jMCPServer("test-version", cfg, mockDB, aService)
+
+		err := s.Start()
+		if err != nil {
+			t.Fatalf("Start() failed: %v", err)
+		}
+
+		toolNames := make([]string, 0, len(s.ListTools()))
+		for _, tool := range s.ListTools() {
+			toolNames = append(toolNames, tool.Name)
+		}
+		assert.ElementsMatch(t, []string{"give-feedback", "list-gds-procedures"}, toolNames)
+	})
 }
 
 // getMockedDBService returns a mock DB service with the standard verifyRequirements expectations set up.
