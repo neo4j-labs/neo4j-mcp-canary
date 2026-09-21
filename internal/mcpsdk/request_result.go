@@ -68,6 +68,20 @@ func NewToolResultText(text string) *CallToolResult {
 	return &CallToolResult{Content: []Content{&TextContent{Text: text}}}
 }
 
+// NewToolResultTextAndStructured builds a successful result carrying both
+// the text block every client can read and, per MCP's structured-output
+// extension (see the tool's OutputSchema, set via WithOutputSchema), a
+// schema-described JSON value clients can consume programmatically instead
+// of re-parsing text. structured is typically a json.RawMessage wrapping a
+// JSON string the caller already produced, which marshals onto the wire
+// verbatim with no extra encode/decode pass.
+func NewToolResultTextAndStructured(text string, structured any) *CallToolResult {
+	return &CallToolResult{
+		Content:           []Content{&TextContent{Text: text}},
+		StructuredContent: structured,
+	}
+}
+
 // NewToolResultError builds a business-logic error result (IsError set,
 // no Go error returned) — the tool call still succeeds at the protocol level.
 func NewToolResultError(text string) *CallToolResult {

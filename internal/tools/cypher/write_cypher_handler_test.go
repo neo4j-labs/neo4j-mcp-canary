@@ -5,6 +5,7 @@ package cypher_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -559,4 +560,43 @@ func TestWriteCypherHandler(t *testing.T) {
 			t.Errorf("expected 'write-cypher cancelled' prefix, got: %s", text.Text)
 		}
 	})
+}
+
+func TestWriteCypherHandler_PopulatesStructuredContent(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	analyticsService := analytics.NewMockService(ctrl)
+
+	mockDB := db.NewMockService(ctrl)
+	mockDB.EXPECT().
+		ExecuteWriteQueryStreaming(gomock.Any(), "CREATE (n:Test) RETURN n", gomock.Nil(), 1000, 0).
+		Return(okResult(), nil)
+	canonicalJSON := `{"rows":[{"n":{}}],"rowCount":1,"truncated":false}`
+	mockDB.EXPECT().QueryResultToJSON(gomock.Any()).Return(canonicalJSON, nil)
+
+	deps := &tools.ToolDependencies{DBService: mockDB, AnalyticsService: analyticsService, CypherMaxRows: 1000}
+	handler := cypher.WriteCypherHandler(deps)
+	request := &mcpsdk.CallToolRequest{Params: &mcpsdk.CallToolParams{Arguments: map[string]any{"query": "CREATE (n:Test) RETURN n"}}}
+
+	result, err := handler(context.Background(), request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text, ok := mcpsdk.AsTextContent(result.Content[0])
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	}
+	if text.Text != canonicalJSON {
+		t.Errorf("Content text = %q, want %q (default OutputFormat should pass JSON through unchanged)", text.Text, canonicalJSON)
+	}
+
+	structured, ok := result.StructuredContent.(json.RawMessage)
+	if !ok {
+		t.Fatalf("expected StructuredContent to be json.RawMessage, got %T", result.StructuredContent)
+	}
+	if string(structured) != canonicalJSON {
+		t.Errorf("StructuredContent = %q, want %q", string(structured), canonicalJSON)
+	}
 }

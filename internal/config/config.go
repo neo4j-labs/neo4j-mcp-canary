@@ -37,6 +37,13 @@ const (
 	//
 	// 900_000 bytes (~900 KB) leaves headroom under the observed 1 MB transport
 	// ceiling. A value of 0 disables the cap.
+	//
+	// This is the combined per-call budget for read-cypher/write-cypher: since
+	// both tools now attach the canonical JSON as structuredContent alongside
+	// the text block (see mcpsdk.NewToolResultTextAndStructured), the same
+	// payload goes out twice. server.buildToolDependencies halves this value
+	// before it reaches the streaming truncation logic, so text+structured
+	// together still respect the ~900 KB/1 MB intent rather than doubling it.
 	DefaultCypherMaxBytes int32 = 900_000
 	// DefaultCypherTimeoutSeconds is the default context timeout (in seconds) for
 	// read-cypher and write-cypher execution. Chosen to match DefaultSchemaTimeoutSeconds
@@ -83,10 +90,17 @@ const (
 	// list-gds-procedures return — at the cost of being less familiar to
 	// generic JSON tooling.
 	OutputFormatTOON OutputFormat = "toon"
+	// OutputFormatMarkdown renders tool responses as Markdown (a table for a
+	// uniform array of flat records, nested bullets otherwise) — a
+	// complementary option to TOON, not a strict upgrade over it: independent
+	// benchmarks on tabular data found Markdown tables scoring higher
+	// *accuracy* than TOON despite using more tokens. Prefer it when result
+	// accuracy matters more than token count.
+	OutputFormatMarkdown OutputFormat = "markdown"
 )
 
 // ValidOutputFormats defines the allowed output format values.
-var ValidOutputFormats = []OutputFormat{OutputFormatJSON, OutputFormatTOON}
+var ValidOutputFormats = []OutputFormat{OutputFormatJSON, OutputFormatTOON, OutputFormatMarkdown}
 
 // Config holds the application configuration
 type Config struct {
@@ -103,7 +117,7 @@ type Config struct {
 	OutputFormat                                OutputFormat // Tool response format sent to the LLM client: "json" (default) or "toon"
 	SchemaSampleSize                            int32
 	CypherMaxRows                               int32         // Per-call row cap applied by read-cypher and write-cypher; 0 disables the cap
-	CypherMaxBytes                              int32         // Per-call byte cap applied alongside CypherMaxRows; 0 disables the cap
+	CypherMaxBytes                              int32         // Combined per-call byte budget for text+structured output alongside CypherMaxRows; 0 disables the cap
 	CypherTimeoutSeconds                        int32         // Context timeout in seconds for read-cypher and write-cypher execution; 0 disables the timeout
 	CypherMaxEstimatedRows                      int32         // EXPLAIN-time estimate threshold above which read-cypher refuses the query; 0 disables the guard
 	TransportMode                               TransportMode // MCP Transport mode (e.g., "stdio", "http")

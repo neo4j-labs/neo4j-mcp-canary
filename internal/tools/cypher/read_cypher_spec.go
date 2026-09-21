@@ -4,8 +4,15 @@
 package cypher
 
 import (
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 )
+
+// cypherResponseOutputSchema describes the structured-output shape shared by
+// read-cypher and write-cypher (both render their result via
+// database.QueryResultToJSON, i.e. database.CypherResponse). Computed once
+// here and reused from write_cypher_spec.go.
+var cypherResponseOutputSchema = mcpsdk.MustOutputSchemaFor[database.CypherResponse]()
 
 // ReadCypherInput is the struct the handler binds incoming arguments into via
 // request.BindArguments. The JSON schema advertised to MCP clients is NOT
@@ -53,5 +60,6 @@ func ReadCypherSpec() mcpsdk.Tool {
 		mcpsdk.WithDestructiveHintAnnotation(false),
 		mcpsdk.WithIdempotentHintAnnotation(true),
 		mcpsdk.WithOpenWorldHintAnnotation(true),
+		mcpsdk.WithOutputSchema(cypherResponseOutputSchema),
 	)
 }

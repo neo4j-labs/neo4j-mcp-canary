@@ -7,6 +7,10 @@ import (
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 )
 
+// getSchemaOutputSchema is computed once at package init since []SchemaItem's
+// shape never changes between calls.
+var getSchemaOutputSchema = mcpsdk.MustOutputSchemaFor[[]SchemaItem]()
+
 func GetSchemaSpec() mcpsdk.Tool {
 	return mcpsdk.NewTool("get-schema",
 		mcpsdk.WithDescription(`
@@ -18,5 +22,6 @@ func GetSchemaSpec() mcpsdk.Tool {
 		mcpsdk.WithIdempotentHintAnnotation(true),
 		mcpsdk.WithDestructiveHintAnnotation(false),
 		mcpsdk.WithOpenWorldHintAnnotation(true),
+		mcpsdk.WithOutputSchema(getSchemaOutputSchema),
 	)
 }

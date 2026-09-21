@@ -216,6 +216,29 @@ func TestGetSchemaHandler_SampleSizeForwardedToAPOC(t *testing.T) {
 	}
 }
 
+func TestGetSchemaHandler_PopulatesStructuredContent(t *testing.T) {
+	deps, mockDB, ctrl := newDepsWithMocks(t)
+	defer ctrl.Finish()
+
+	records := []*neo4j.Record{
+		apocRecord("Person", "node", map[string]interface{}{"name": apocProperty("STRING")}, nil),
+	}
+	mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Any()).Return(records, nil)
+
+	handler := cypher.GetSchemaHandler(deps, 100)
+	result, err := handler(context.Background(), &mcpsdk.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := getResultText(t, result)
+	structured, ok := result.StructuredContent.(json.RawMessage)
+	if !ok {
+		t.Fatalf("expected StructuredContent to be json.RawMessage, got %T", result.StructuredContent)
+	}
+	assertJSONEquals(t, text, string(structured))
+}
+
 // --- Schema processing tests ---
 
 func TestGetSchemaProcessing(t *testing.T) {

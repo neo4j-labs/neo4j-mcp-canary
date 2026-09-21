@@ -10,6 +10,8 @@
 package mcpsdk
 
 import (
+	"fmt"
+
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -40,6 +42,27 @@ func NewTool(name string, opts ...ToolOption) Tool {
 // WithDescription sets the tool's human-readable description.
 func WithDescription(description string) ToolOption {
 	return func(t *Tool) { t.Description = description }
+}
+
+// WithOutputSchema declares the JSON Schema describing the tool's
+// structured output (see NewToolResultTextAndStructured). This is purely
+// advisory metadata for clients — this codebase's tool registration path
+// (Server.AddTool, not the SDK's generic AddTool[In,Out]) never validates a
+// handler's CallToolResult.StructuredContent against it.
+func WithOutputSchema(schema *jsonschema.Schema) ToolOption {
+	return func(t *Tool) { t.OutputSchema = schema }
+}
+
+// MustOutputSchemaFor reflects a JSON Schema for T, for use with
+// WithOutputSchema. Intended to be called once, at package init, over a
+// fixed Go type — a failure here is a programming error (an unreflectable
+// type), not a runtime condition, hence the panic rather than an error return.
+func MustOutputSchemaFor[T any]() *jsonschema.Schema {
+	schema, err := jsonschema.For[T](nil)
+	if err != nil {
+		panic(fmt.Sprintf("mcpsdk: failed to reflect output schema for %T: %v", *new(T), err))
+	}
+	return schema
 }
 
 // propertyBuilder accumulates a single input property's schema plus whether

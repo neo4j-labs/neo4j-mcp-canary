@@ -579,7 +579,7 @@ func FormatRecordsAsJSON(records []*neo4j.Record) (string, error) {
 	return string(formattedResponse), nil
 }
 
-// cypherResponse is the wire shape produced by QueryResultToJSON. It's a JSON
+// CypherResponse is the wire shape produced by QueryResultToJSON. It's a JSON
 // envelope around the rows so that truncation is self-describing in the MCP tool
 // response. Compared to a bare array (the Neo4jRecordsToJSON output), it trades
 // a small amount of parsing ceremony for the ability to tell an agent "your
@@ -589,7 +589,7 @@ func FormatRecordsAsJSON(records []*neo4j.Record) (string, error) {
 // The envelope is emitted even when the result is complete (truncated=false).
 // Consistent shape is easier to reason about than a conditional contract, and the
 // overhead of the wrapper keys is negligible next to the rows themselves.
-type cypherResponse struct {
+type CypherResponse struct {
 	Rows      []map[string]any `json:"rows"`
 	RowCount  int              `json:"rowCount"`
 	Truncated bool             `json:"truncated"`
@@ -611,7 +611,7 @@ type cypherResponse struct {
 	Hint string `json:"hint,omitempty"`
 }
 
-// QueryResultToJSON renders a streaming QueryResult as a cypherResponse JSON
+// QueryResultToJSON renders a streaming QueryResult as a CypherResponse JSON
 // document. It delegates to FormatQueryResultAsJSON, which holds no
 // Neo4jService-specific state — kept as a method here only so existing
 // callers of the RecordFormatter interface are unaffected.
@@ -620,7 +620,7 @@ func (s *Neo4jService) QueryResultToJSON(result *QueryResult) (string, error) {
 }
 
 // FormatQueryResultAsJSON renders a streaming QueryResult as a
-// cypherResponse JSON document. A nil input is treated as an error rather
+// CypherResponse JSON document. A nil input is treated as an error rather
 // than an empty envelope, because the only way to reach this function with
 // nil is a handler bug we want to catch in tests rather than paper over.
 //
@@ -644,7 +644,7 @@ func FormatQueryResultAsJSON(result *QueryResult) (string, error) {
 		rows = append(rows, convertMapToTagged(record.AsMap()))
 	}
 
-	resp := cypherResponse{
+	resp := CypherResponse{
 		Rows:      rows,
 		RowCount:  result.RowCount,
 		Truncated: result.Truncated,

@@ -20,6 +20,22 @@ func serverToolNamed(name string) mcpsdk.ServerTool {
 	return mcpsdk.ServerTool{Tool: mcpsdk.NewTool(name)}
 }
 
+// TestBuildToolDependencies_HalvesCypherMaxBytes locks in the byte-budget
+// halving: read-cypher/write-cypher now always attach the canonical JSON as
+// structuredContent alongside the text block, so the same payload goes out
+// twice — the effective per-call cap enforced during streaming must be half
+// of the configured NEO4J_CYPHER_MAX_BYTES, or a response that used to just
+// fit under the ~1MB MCP transport ceiling would now double it.
+func TestBuildToolDependencies_HalvesCypherMaxBytes(t *testing.T) {
+	s := &Neo4jMCPServer{config: &config.Config{CypherMaxBytes: 900_000}}
+
+	deps := s.buildToolDependencies()
+
+	if deps.CypherMaxBytes != 450_000 {
+		t.Errorf("CypherMaxBytes = %d, want 450000 (half of configured 900000)", deps.CypherMaxBytes)
+	}
+}
+
 // TestGetAllToolsDefs_EveryToolHasCategoryAndLabel enforces the "every tool
 // must belong to a category and carry a label" requirement as a test rather
 // than a convention, since getAllToolsDefs is a hand-maintained literal

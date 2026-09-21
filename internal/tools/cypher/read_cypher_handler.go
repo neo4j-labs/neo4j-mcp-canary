@@ -5,6 +5,7 @@ package cypher
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -243,12 +244,12 @@ func handleReadCypher(ctx context.Context, request *mcpsdk.CallToolRequest, deps
 	// the truncation metadata (truncated / truncationReason / rowCount / maxRows /
 	// maxBytes / hint). The agent on the other side can then read the hint and
 	// retry with a LIMIT or a narrower projection depending on which cap fired.
-	response, err := deps.DBService.QueryResultToJSON(result)
+	canonicalJSON, err := deps.DBService.QueryResultToJSON(result)
 	if err != nil {
 		slog.Error("error formatting query results", "error", err)
 		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
-	response, err = tools.EncodeOutput(response, deps.OutputFormat)
+	response, err := tools.EncodeOutput(canonicalJSON, deps.OutputFormat)
 	if err != nil {
 		slog.Error("error encoding query results", "error", err)
 		return mcpsdk.NewToolResultError(err.Error()), nil
@@ -267,7 +268,7 @@ func handleReadCypher(ctx context.Context, request *mcpsdk.CallToolRequest, deps
 		emitCypherEstimateAccuracy(deps, outcome, estimatedRows, result.RowCount, result.Truncated)
 	}
 
-	return mcpsdk.NewToolResultText(response), nil
+	return mcpsdk.NewToolResultTextAndStructured(response, json.RawMessage(canonicalJSON)), nil
 }
 
 // emitCypherEstimateAccuracy dispatches a CYPHER_ESTIMATE_ACCURACY event if

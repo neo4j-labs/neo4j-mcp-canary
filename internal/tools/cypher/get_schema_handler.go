@@ -78,7 +78,7 @@ func handleGetSchema(ctx context.Context, deps *tools.ToolDependencies, schemaSa
 		slog.Error("failed to encode structured schema", "error", err)
 		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
-	return mcpsdk.NewToolResultText(response), nil
+	return mcpsdk.NewToolResultTextAndStructured(response, json.RawMessage(jsonData)), nil
 }
 
 // --- Output types ---
