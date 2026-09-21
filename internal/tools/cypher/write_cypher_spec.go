@@ -42,5 +42,6 @@ func WriteCypherSpec() mcpsdk.Tool {
 		mcpsdk.WithDestructiveHintAnnotation(true),
 		mcpsdk.WithIdempotentHintAnnotation(false),
 		mcpsdk.WithOpenWorldHintAnnotation(true),
+		mcpsdk.WithOutputSchema(cypherResponseOutputSchema),
 	)
 }

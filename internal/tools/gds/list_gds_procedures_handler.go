@@ -5,6 +5,7 @@ package gds
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 
@@ -39,16 +40,16 @@ func handleListGdsProcedures(ctx context.Context, deps *tools.ToolDependencies) 
 		return mcpsdk.NewToolResultError(formattedErrorMessage.Error()), nil
 	}
 
-	response, err := deps.DBService.Neo4jRecordsToJSON(records)
+	canonicalJSON, err := deps.DBService.Neo4jRecordsToJSON(records)
 	if err != nil {
 		slog.Error("failed to format list-gds-procedures results to JSON", "error", err)
 		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
-	response, err = tools.EncodeOutput(response, deps.OutputFormat)
+	response, err := tools.EncodeOutput(canonicalJSON, deps.OutputFormat)
 	if err != nil {
 		slog.Error("failed to encode list-gds-procedures results", "error", err)
 		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
 
-	return mcpsdk.NewToolResultText(response), nil
+	return mcpsdk.NewToolResultTextAndStructured(response, json.RawMessage(canonicalJSON)), nil
 }

@@ -3,7 +3,30 @@
 
 package gds
 
-import "github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
+import (
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
+
+	"github.com/google/jsonschema-go/jsonschema"
+)
+
+// listGdsProceduresOutputSchema describes the structured-output shape:
+// listGdsProceduresQuery's fixed YIELD list (name, description, signature,
+// type) isn't backed by a Go struct, so this is hand-written rather than
+// reflected. (jsonschema-go is a generic JSON Schema library, not an MCP
+// SDK, so importing it here doesn't violate mcpsdk's "only package allowed
+// to import an MCP SDK directly" boundary.)
+var listGdsProceduresOutputSchema = &jsonschema.Schema{
+	Type: "array",
+	Items: &jsonschema.Schema{
+		Type: "object",
+		Properties: map[string]*jsonschema.Schema{
+			"name":        {Type: "string"},
+			"description": {Type: "string"},
+			"signature":   {Type: "string"},
+			"type":        {Type: "string"},
+		},
+	},
+}
 
 func ListGDSProceduresSpec() mcpsdk.Tool {
 	return mcpsdk.NewTool("list-gds-procedures",
@@ -22,5 +45,6 @@ func ListGDSProceduresSpec() mcpsdk.Tool {
 		mcpsdk.WithIdempotentHintAnnotation(true),
 		mcpsdk.WithDestructiveHintAnnotation(false),
 		mcpsdk.WithOpenWorldHintAnnotation(true),
+		mcpsdk.WithOutputSchema(listGdsProceduresOutputSchema),
 	)
 }

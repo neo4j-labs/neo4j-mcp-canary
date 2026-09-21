@@ -5,6 +5,7 @@ package cypher
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -91,16 +92,16 @@ func handleWriteCypher(ctx context.Context, request *mcpsdk.CallToolRequest, dep
 		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
 
-	response, err := deps.DBService.QueryResultToJSON(result)
+	canonicalJSON, err := deps.DBService.QueryResultToJSON(result)
 	if err != nil {
 		slog.Error("error formatting query results", "error", err)
 		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
-	response, err = tools.EncodeOutput(response, deps.OutputFormat)
+	response, err := tools.EncodeOutput(canonicalJSON, deps.OutputFormat)
 	if err != nil {
 		slog.Error("error encoding query results", "error", err)
 		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
 
-	return mcpsdk.NewToolResultText(response), nil
+	return mcpsdk.NewToolResultTextAndStructured(response, json.RawMessage(canonicalJSON)), nil
 }

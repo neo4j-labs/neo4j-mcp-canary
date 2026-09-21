@@ -145,7 +145,7 @@ var fields = []Field{
 	},
 	{
 		Name: "OutputFormat", EnvVar: "NEO4J_OUTPUT_FORMAT", FlagName: "neo4j-output-format",
-		Placeholder: "FORMAT", Description: "Tool response format sent to the LLM client: json or toon", DefaultDisplay: "json",
+		Placeholder: "FORMAT", Description: "Tool response format sent to the LLM client: json, toon, or markdown", DefaultDisplay: "json",
 		Setter: func(cfg *Config, raw string) {
 			format := OutputFormat(defaultString(raw, string(OutputFormatJSON)))
 			if !slices.Contains(ValidOutputFormats, format) {

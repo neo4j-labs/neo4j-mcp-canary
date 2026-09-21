@@ -5,6 +5,7 @@ package cypher_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -1243,4 +1244,47 @@ func TestReadCypherHandler(t *testing.T) {
 			t.Errorf("wrapped AccessMode not classified; check errors.As unwrap path: %s", text.Text)
 		}
 	})
+}
+
+func TestReadCypherHandler_PopulatesStructuredContent(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	analyticsService := amocks.NewMockService(ctrl)
+	analyticsService.EXPECT().IsEnabled().AnyTimes().Return(false)
+
+	mockDB := db.NewMockService(ctrl)
+	mockDB.EXPECT().
+		GetQueryType(gomock.Any(), "MATCH (n) RETURN n", gomock.Nil()).
+		Return(neo4j.QueryTypeReadOnly, nil)
+	mockDB.EXPECT().
+		ExecuteReadQueryStreaming(gomock.Any(), "MATCH (n) RETURN n", gomock.Nil(), 1000, 0).
+		Return(okResult(), nil)
+	canonicalJSON := `{"rows":[{"n":{"name":"Alice"}}],"rowCount":1,"truncated":false}`
+	mockDB.EXPECT().QueryResultToJSON(gomock.Any()).Return(canonicalJSON, nil)
+
+	deps := &tools.ToolDependencies{DBService: mockDB, AnalyticsService: analyticsService, CypherMaxRows: 1000}
+	handler := cypher.ReadCypherHandler(deps)
+	request := &mcpsdk.CallToolRequest{Params: &mcpsdk.CallToolParams{Arguments: map[string]any{"query": "MATCH (n) RETURN n"}}}
+
+	result, err := handler(context.Background(), request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text, ok := mcpsdk.AsTextContent(result.Content[0])
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	}
+	if text.Text != canonicalJSON {
+		t.Errorf("Content text = %q, want %q (default OutputFormat should pass JSON through unchanged)", text.Text, canonicalJSON)
+	}
+
+	structured, ok := result.StructuredContent.(json.RawMessage)
+	if !ok {
+		t.Fatalf("expected StructuredContent to be json.RawMessage, got %T", result.StructuredContent)
+	}
+	if string(structured) != canonicalJSON {
+		t.Errorf("StructuredContent = %q, want %q", string(structured), canonicalJSON)
+	}
 }

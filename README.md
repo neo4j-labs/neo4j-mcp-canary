@@ -209,7 +209,7 @@ Core connection and behaviour:
 | `NEO4J_SCHEMA_SAMPLE_SIZE`           | `1000`    | Nodes per label APOC examines when inferring schema                           |
 | `NEO4J_LOG_LEVEL`                    | `info`    | `debug`, `info`, `notice`, `warning`, `error`, `critical`, `alert`, `emergency` |
 | `NEO4J_LOG_FORMAT`                   | `text`    | `text` or `json`                                                               |
-| `NEO4J_OUTPUT_FORMAT`                | `json`    | Tool response format sent to the LLM client: `json` or `toon`                 |
+| `NEO4J_OUTPUT_FORMAT`                | `json`    | Tool response format sent to the LLM client: `json`, `toon`, or `markdown`     |
 | `NEO4J_TRANSPORT_MODE`               | `stdio`   | `stdio` or `http` (supersedes the deprecated `NEO4J_MCP_TRANSPORT`)            |
 
 #### Connecting via the Query API instead of Bolt
@@ -243,7 +243,7 @@ Cypher execution safeguards (see [Cypher Execution Safeguards](#cypher-execution
 | Environment Variable                | Default     | Purpose                                                                 |
 | ----------------------------------- | ----------- | ----------------------------------------------------------------------- |
 | `NEO4J_CYPHER_MAX_ROWS`             | `1000`      | Per-call row cap on `read-cypher` / `write-cypher`; `0` disables        |
-| `NEO4J_CYPHER_MAX_BYTES`            | `900000`    | Per-call byte cap (~900 KB) on the response envelope; `0` disables      |
+| `NEO4J_CYPHER_MAX_BYTES`            | `900000`    | Combined per-call byte budget (~900 KB) for text+structured output; `0` disables |
 | `NEO4J_CYPHER_TIMEOUT`              | `30`        | Execution timeout in seconds; `0` disables                              |
 | `NEO4J_CYPHER_MAX_ESTIMATED_ROWS`   | `1000000`   | EXPLAIN-time planner estimate above which `read-cypher` refuses a query; `0` disables |
 
@@ -276,7 +276,7 @@ Available flags:
 - `--neo4j-mcp-enabled-tool-categories` — overrides `NEO4J_MCP_ENABLED_TOOL_CATEGORIES` (comma-separated categories)
 - `--neo4j-telemetry` — overrides `NEO4J_TELEMETRY` (`true` / `false`)
 - `--neo4j-schema-sample-size` — overrides `NEO4J_SCHEMA_SAMPLE_SIZE`
-- `--neo4j-output-format` — overrides `NEO4J_OUTPUT_FORMAT` (`json` / `toon`)
+- `--neo4j-output-format` — overrides `NEO4J_OUTPUT_FORMAT` (`json` / `toon` / `markdown`)
 
 **Cypher execution safeguards**
 
@@ -330,9 +330,9 @@ The equivalent JSON is also accepted (`.json` extension). Only scalar values (st
 
 Adding a new configuration parameter to the server (env var + CLI flag + config-file key, all at once) means adding one entry to the `fields` slice in [`internal/config/schema.go`](internal/config/schema.go) — see that file's doc comments for the shape.
 
-### Response Format (JSON vs TOON)
+### Response Format (JSON, TOON, or Markdown)
 
-Tool responses (`read-cypher`, `write-cypher`, `get-schema`, `list-gds-procedures`) are rendered as JSON by default. Set `NEO4J_OUTPUT_FORMAT` (or `--neo4j-output-format`) to `toon` to render them as [TOON](https://github.com/toon-format/toon-go) (Token-Oriented Object Notation) instead — a compact, still human-readable format that cuts LLM token usage versus JSON, especially for the tabular row shapes these tools return:
+Tool responses (`read-cypher`, `write-cypher`, `get-schema`, `list-gds-procedures`) are rendered as JSON by default. Set `NEO4J_OUTPUT_FORMAT` (or `--neo4j-output-format`) to `toon` or `markdown` to render them differently instead:
 
 ```bash
 neo4j-mcp-canary --neo4j-output-format toon
@@ -353,7 +353,7 @@ A `read-cypher` result as JSON:
 }
 ```
 
-The same result as TOON:
+The same result as [TOON](https://github.com/toon-format/toon-go) (Token-Oriented Object Notation) — a compact, still human-readable format that cuts LLM token usage versus JSON, especially for the tabular row shapes these tools return:
 
 ```
 rowCount: 2
@@ -363,7 +363,27 @@ rows[2]{age,name}:
 truncated: false
 ```
 
+The same result as `markdown` — a uniform array of flat rows renders as a table, nested/non-uniform data (e.g. `get-schema`'s output) renders as nested bullets:
+
+```
+- **rowCount**: 2
+- **rows**:
+| age | name |
+| --- | --- |
+| 30 | Alice |
+| 25 | Bob |
+- **truncated**: false
+```
+
+`markdown` is a complement to `toon`, not a strict upgrade over it: independent benchmarks on tabular data found Markdown tables scoring higher _accuracy_ than TOON despite using more tokens, while TOON still wins on raw token count. Prefer `toon` when token budget matters most; prefer `markdown` when result accuracy matters most.
+
 An invalid value falls back to `json` with a warning on stderr, the same way `NEO4J_LOG_FORMAT` does.
+
+### Structured output (`structuredContent` / `outputSchema`)
+
+Every tool call result also carries [MCP's structured-output extension](https://modelcontextprotocol.io/specification/2025-06-18/server/tools#structured-content): alongside the text block described above (in whichever format `NEO4J_OUTPUT_FORMAT` selects), the result's `structuredContent` field always carries the same data as canonical JSON, matched by an advertised `outputSchema` on the tool definition. A client that wants to consume results programmatically can read `structuredContent` directly instead of re-parsing the text block, regardless of which text format is configured.
+
+Because `structuredContent` duplicates the payload already in the text block, `read-cypher`/`write-cypher` enforce `NEO4J_CYPHER_MAX_BYTES` as a **combined** budget: the byte cap actually applied during streaming is half the configured value, so text+structured together still stay under the ~900 KB/1 MB intent described below rather than doubling it.
 
 ## Cypher Execution Safeguards
 
@@ -374,7 +394,7 @@ An invalid value falls back to `json` with a warning on stderr, the same way `NE
 | Planner estimate      | `NEO4J_CYPHER_MAX_ESTIMATED_ROWS` | `1000000`   | Before execution — query refused if the planner's root `EstimatedRows` exceeds the threshold |
 | Execution timeout     | `NEO4J_CYPHER_TIMEOUT`            | `30s`       | During execution — query cancelled after the deadline  |
 | Row cap               | `NEO4J_CYPHER_MAX_ROWS`           | `1000`      | During streaming — response truncated at the row limit |
-| Byte cap              | `NEO4J_CYPHER_MAX_BYTES`          | `900000`    | During streaming — response truncated when the envelope grows past ~900 KB |
+| Byte cap              | `NEO4J_CYPHER_MAX_BYTES`          | `900000`    | During streaming — response truncated when the envelope grows past half the configured value (see [Structured output](#structured-output-structuredcontent--outputschema)) |
 
 Set any value to `0` to disable that specific layer.
 

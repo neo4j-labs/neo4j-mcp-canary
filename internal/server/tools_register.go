@@ -159,6 +159,13 @@ func filterGDSTools(defs []ToolDefinition) []ToolDefinition {
 }
 
 // buildToolDependencies creates a ToolDependencies with all config wired through.
+//
+// CypherMaxBytes is halved here: read-cypher/write-cypher now always attach
+// the canonical JSON as structuredContent alongside the text block (see
+// NewToolResultTextAndStructured), so the same payload goes out twice.
+// NEO4J_CYPHER_MAX_BYTES documents the combined per-call budget; halving the
+// value actually enforced during streaming keeps text+structured together
+// under that budget rather than doubling it.
 func (s *Neo4jMCPServer) buildToolDependencies() *tools.ToolDependencies {
 	return &tools.ToolDependencies{
 		DBService:              s.dbService,
@@ -166,7 +173,7 @@ func (s *Neo4jMCPServer) buildToolDependencies() *tools.ToolDependencies {
 		OutputFormat:           s.config.OutputFormat,
 		SchemaSampleSize:       int(s.config.SchemaSampleSize),
 		CypherMaxRows:          int(s.config.CypherMaxRows),
-		CypherMaxBytes:         int(s.config.CypherMaxBytes),
+		CypherMaxBytes:         int(s.config.CypherMaxBytes) / 2,
 		CypherTimeout:          time.Duration(s.config.CypherTimeoutSeconds) * time.Second,
 		CypherMaxEstimatedRows: int(s.config.CypherMaxEstimatedRows),
 	}

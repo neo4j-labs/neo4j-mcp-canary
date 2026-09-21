@@ -41,3 +41,30 @@ func TestEncodeOutput_TOONInvalidJSONErrors(t *testing.T) {
 		t.Fatal("EncodeOutput() error = nil, want error for invalid JSON input")
 	}
 }
+
+func TestEncodeOutput_MarkdownRendersTabularRowsAsATable(t *testing.T) {
+	input := `{"rows":[{"age":30,"name":"Alice"},{"age":25,"name":"Bob"}],"rowCount":2,"truncated":false}`
+
+	got, err := EncodeOutput(input, config.OutputFormatMarkdown)
+	if err != nil {
+		t.Fatalf("EncodeOutput() error = %v", err)
+	}
+
+	want := "- **rowCount**: 2\n" +
+		"- **rows**:\n" +
+		"| age | name |\n" +
+		"| --- | --- |\n" +
+		"| 30 | Alice |\n" +
+		"| 25 | Bob |\n" +
+		"- **truncated**: false"
+	if got != want {
+		t.Errorf("EncodeOutput() = %q, want %q", got, want)
+	}
+}
+
+func TestEncodeOutput_MarkdownInvalidJSONErrors(t *testing.T) {
+	_, err := EncodeOutput("not json", config.OutputFormatMarkdown)
+	if err == nil {
+		t.Fatal("EncodeOutput() error = nil, want error for invalid JSON input")
+	}
+}

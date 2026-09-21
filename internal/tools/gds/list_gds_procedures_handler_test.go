@@ -5,6 +5,7 @@ package gds_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -114,4 +115,40 @@ func TestListGdsProceduresHandler(t *testing.T) {
 			t.Error("Expected error result for JSON formatting failure")
 		}
 	})
+}
+
+func TestListGdsProceduresHandler_PopulatesStructuredContent(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockDB := db.NewMockService(ctrl)
+	mockDB.EXPECT().
+		ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Nil()).
+		Return([]*neo4j.Record{}, nil)
+	canonicalJSON := `[{"name":"gds.pageRank.stream","description":"PageRank","signature":"sig","type":"procedure"}]`
+	mockDB.EXPECT().Neo4jRecordsToJSON(gomock.Any()).Return(canonicalJSON, nil)
+
+	deps := &tools.ToolDependencies{DBService: mockDB}
+	handler := gds.ListGdsProceduresHandler(deps)
+
+	result, err := handler(context.Background(), &mcpsdk.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text, ok := mcpsdk.AsTextContent(result.Content[0])
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	}
+	if text.Text != canonicalJSON {
+		t.Errorf("Content text = %q, want %q (default OutputFormat should pass JSON through unchanged)", text.Text, canonicalJSON)
+	}
+
+	structured, ok := result.StructuredContent.(json.RawMessage)
+	if !ok {
+		t.Fatalf("expected StructuredContent to be json.RawMessage, got %T", result.StructuredContent)
+	}
+	if string(structured) != canonicalJSON {
+		t.Errorf("StructuredContent = %q, want %q", string(structured), canonicalJSON)
+	}
 }

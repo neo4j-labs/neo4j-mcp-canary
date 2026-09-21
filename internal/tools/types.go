@@ -38,6 +38,11 @@ type ToolDependencies struct {
 	// with no structured signal to the agent. When the cap fires, the truncation
 	// hint steers the agent toward projecting fewer properties rather than
 	// lowering the LIMIT. A value of 0 disables the cap.
+	//
+	// This is already half of config.Config.CypherMaxBytes (see
+	// server.buildToolDependencies) — read-cypher/write-cypher attach the same
+	// JSON as structuredContent alongside the text block, so the configured
+	// value is a combined budget for both.
 	CypherMaxBytes int
 	// CypherTimeout is the per-call context timeout applied by the read-cypher and
 	// write-cypher handlers. It wraps both query-type classification and execution.
