@@ -71,7 +71,7 @@ Use `USE_CONTAINER` to control whether tests start a Neo4j container or connect 
 **Example with container (default):**
 
 ```bash
-NEO4J_IMAGE=neo4j:5-community \
+NEO4J_IMAGE=neo4j:2026.07-community \
 NEO4J_USERNAME=admin \
 NEO4J_PASSWORD=secret \
 go test -tags=integration ./test/integration/... -v
@@ -89,6 +89,7 @@ go test -tags=integration ./test/integration/... -v
 
 ## Important
 
+- `NEO4J_IMAGE` must resolve to a calendar-versioned release (>= `2026.07`) or a classic-Aura release (>= `5.26-aura`) — the Query API integration tests (`TestQueryAPI*`) rely on `queryapi.CheckMinimumVersion`'s floor and will fail against an older or bare classic-versioned image.
 - Always use `t.Parallel()` for parallel execution
 - Always use the `UniqueLabel` returned by `SeedNode()` or `GetUniqueLabel()` in your queries for isolation
 - Test data is automatically tagged with unique labels and cleaned up after each test

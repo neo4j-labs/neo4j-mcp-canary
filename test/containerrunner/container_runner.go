@@ -127,7 +127,17 @@ func createNeo4jContainer(ctx context.Context) (testcontainers.Container, string
 			"NEO4J_AUTH":        fmt.Sprintf("%s/%s", config.GetEnvWithDefault("NEO4J_USERNAME", "neo4j"), config.GetEnvWithDefault("NEO4J_PASSWORD", "password")),
 			"NEO4JLABS_PLUGINS": config.GetEnvWithDefault("NEO4JLABS_PLUGINS", `["apoc","graph-data-science"]`),
 		},
-		WaitingFor: wait.ForListeningPort("7687/tcp").WithStartupTimeout(119 * time.Second),
+		// Bolt (7687) and the HTTP/Query API discovery endpoint (7474) come up
+		// independently, and not necessarily at the same moment — waiting on
+		// Bolt alone let callers observe a "ready" container whose HTTP port
+		// wasn't actually serving yet (e.g. queryapi.DiscoverVersion's raw GET
+		// against baseURL would intermittently see a connection reset). Wait
+		// on both so every caller of Start gets a container whose Bolt driver
+		// and Query API are both actually usable.
+		WaitingFor: wait.ForAll(
+			wait.ForListeningPort("7687/tcp").WithStartupTimeout(119*time.Second),
+			wait.ForHTTP("/").WithPort("7474/tcp").WithStartupTimeout(119*time.Second),
+		),
 	}
 
 	ctr, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
