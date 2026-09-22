@@ -91,6 +91,111 @@ func TestEmitter_OnToolCallComplete(t *testing.T) {
 		}
 	})
 
+	t.Run("attaches vector info for a fulltext-search tool call", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		var gotFullTextSearch *bool
+		analyticsService := analytics.NewMockService(ctrl)
+		analyticsService.EXPECT().IsEnabled().Times(1).Return(true)
+		analyticsService.EXPECT().NewToolEvent("fulltext-search", true, gomock.Any(), config.OutputFormatJSON).
+			Times(1).
+			Do(func(_ string, _ bool, vectorInfo *analyticsReal.ToolVectorInfo, _ config.OutputFormat) {
+				if vectorInfo != nil {
+					gotFullTextSearch = vectorInfo.FullTextSearch
+				}
+			})
+		analyticsService.EXPECT().EmitEvent(gomock.Any()).Times(1)
+
+		e := eventing.NewEmitter(analyticsService, db.NewMockService(ctrl), cfg, "test-version")
+		e.OnToolCallComplete(context.Background(), toolRequest("fulltext-search", ""), mcpsdk.NewToolResultText("ok"))
+
+		if assert.NotNil(t, gotFullTextSearch) {
+			assert.True(t, *gotFullTextSearch)
+		}
+	})
+
+	t.Run("attaches vector info for a set-vector-property tool call", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		var gotVectorPropertySet *bool
+		analyticsService := analytics.NewMockService(ctrl)
+		analyticsService.EXPECT().IsEnabled().Times(1).Return(true)
+		analyticsService.EXPECT().NewToolEvent("set-vector-property", true, gomock.Any(), config.OutputFormatJSON).
+			Times(1).
+			Do(func(_ string, _ bool, vectorInfo *analyticsReal.ToolVectorInfo, _ config.OutputFormat) {
+				if vectorInfo != nil {
+					gotVectorPropertySet = vectorInfo.VectorPropertySet
+				}
+			})
+		analyticsService.EXPECT().EmitEvent(gomock.Any()).Times(1)
+
+		e := eventing.NewEmitter(analyticsService, db.NewMockService(ctrl), cfg, "test-version")
+		e.OnToolCallComplete(context.Background(), toolRequest("set-vector-property", ""), mcpsdk.NewToolResultText("ok"))
+
+		if assert.NotNil(t, gotVectorPropertySet) {
+			assert.True(t, *gotVectorPropertySet)
+		}
+	})
+
+	t.Run("attaches vector info for explain-cypher and profile-cypher, matching read/write-cypher", func(t *testing.T) {
+		for _, tool := range []string{"explain-cypher", "profile-cypher"} {
+			t.Run(tool, func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				defer ctrl.Finish()
+
+				var gotVectorSearch *bool
+				analyticsService := analytics.NewMockService(ctrl)
+				analyticsService.EXPECT().IsEnabled().Times(1).Return(true)
+				analyticsService.EXPECT().NewToolEvent(tool, true, gomock.Any(), config.OutputFormatJSON).
+					Times(1).
+					Do(func(_ string, _ bool, vectorInfo *analyticsReal.ToolVectorInfo, _ config.OutputFormat) {
+						if vectorInfo != nil {
+							gotVectorSearch = vectorInfo.VectorSearch
+						}
+					})
+				analyticsService.EXPECT().EmitEvent(gomock.Any()).Times(1)
+
+				e := eventing.NewEmitter(analyticsService, db.NewMockService(ctrl), cfg, "test-version")
+				e.OnToolCallComplete(context.Background(), toolRequest(tool, "MATCH (n) RETURN db.index.vector.queryNodes('idx', 5, n.embedding)"), mcpsdk.NewToolResultText("ok"))
+
+				if assert.NotNil(t, gotVectorSearch) {
+					assert.True(t, *gotVectorSearch)
+				}
+			})
+		}
+	})
+
+	t.Run("emits a GDS project-created event when profile-cypher runs gds.graph.project", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		analyticsService := analytics.NewMockService(ctrl)
+		analyticsService.EXPECT().IsEnabled().Times(1).Return(true)
+		analyticsService.EXPECT().NewToolEvent("profile-cypher", true, gomock.Any(), config.OutputFormatJSON).Times(1)
+		analyticsService.EXPECT().NewGDSProjCreatedEvent().Times(1)
+		analyticsService.EXPECT().EmitEvent(gomock.Any()).Times(2) // tool event + GDS project-created event
+
+		e := eventing.NewEmitter(analyticsService, db.NewMockService(ctrl), cfg, "test-version")
+		e.OnToolCallComplete(context.Background(), toolRequest("profile-cypher", "CALL gds.graph.project('g', '*', '*')"), mcpsdk.NewToolResultText("ok"))
+	})
+
+	t.Run("does not emit a GDS event for explain-cypher, since EXPLAIN never executes", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		analyticsService := analytics.NewMockService(ctrl)
+		analyticsService.EXPECT().IsEnabled().Times(1).Return(true)
+		analyticsService.EXPECT().NewToolEvent("explain-cypher", true, gomock.Any(), config.OutputFormatJSON).Times(1)
+		analyticsService.EXPECT().EmitEvent(gomock.Any()).Times(1)
+		// No NewGDSProjCreatedEvent expectation: explain-cypher never executes
+		// the query, so no projection was actually created.
+
+		e := eventing.NewEmitter(analyticsService, db.NewMockService(ctrl), cfg, "test-version")
+		e.OnToolCallComplete(context.Background(), toolRequest("explain-cypher", "CALL gds.graph.project('g', '*', '*')"), mcpsdk.NewToolResultText("ok"))
+	})
+
 	t.Run("emits a GDS project-created event when read-cypher runs gds.graph.project", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
