@@ -254,9 +254,9 @@ func TestGetSchemaProcessing(t *testing.T) {
 					"name": apocProperty("STRING"),
 				}, nil),
 			},
-			expectedJSON: `[
+			expectedJSON: `{"schema": [
 				{"key": "Genre", "value": {"type": "node", "properties": {"name": "STRING"}}}
-			]`,
+			]}`,
 		},
 		{
 			name: "node with outgoing relationship carrying properties",
@@ -276,7 +276,7 @@ func TestGetSchemaProcessing(t *testing.T) {
 					"title": apocProperty("STRING"),
 				}, nil),
 			},
-			expectedJSON: `[
+			expectedJSON: `{"schema": [
 				{
 					"key": "Person",
 					"value": {
@@ -295,7 +295,7 @@ func TestGetSchemaProcessing(t *testing.T) {
 					"key": "Movie",
 					"value": {"type": "node", "properties": {"title": "STRING"}}
 				}
-			]`,
+			]}`,
 		},
 		{
 			name: "relationship entry has type='relationship' and no relationships map",
@@ -304,21 +304,21 @@ func TestGetSchemaProcessing(t *testing.T) {
 					"roles": apocProperty("LIST"),
 				}, nil),
 			},
-			expectedJSON: `[
+			expectedJSON: `{"schema": [
 				{
 					"key": "ACTED_IN",
 					"value": {"type": "relationship", "properties": {"roles": "LIST"}}
 				}
-			]`,
+			]}`,
 		},
 		{
 			name: "relationship with no properties produces empty props (omitted in JSON)",
 			records: []*neo4j.Record{
 				apocRecord("DIRECTED", "relationship", map[string]interface{}{}, nil),
 			},
-			expectedJSON: `[
+			expectedJSON: `{"schema": [
 				{"key": "DIRECTED", "value": {"type": "relationship"}}
-			]`,
+			]}`,
 		},
 		{
 			name: "node with nil relationships field behaves as no relationships",
@@ -327,9 +327,9 @@ func TestGetSchemaProcessing(t *testing.T) {
 					map[string]interface{}{"id": apocProperty("STRING")},
 					nil),
 			},
-			expectedJSON: `[
+			expectedJSON: `{"schema": [
 				{"key": "Standalone", "value": {"type": "node", "properties": {"id": "STRING"}}}
-			]`,
+			]}`,
 		},
 		{
 			name: "node with multiple outgoing relationship types",
@@ -342,7 +342,7 @@ func TestGetSchemaProcessing(t *testing.T) {
 					},
 				),
 			},
-			expectedJSON: `[
+			expectedJSON: `{"schema": [
 				{
 					"key": "Document",
 					"value": {
@@ -354,7 +354,7 @@ func TestGetSchemaProcessing(t *testing.T) {
 						}
 					}
 				}
-			]`,
+			]}`,
 		},
 	}
 
@@ -498,7 +498,7 @@ func TestGetSchemaProcessing_RealisticGraph(t *testing.T) {
 		t.Fatalf("expected success, got error: %s", getResultText(t, result))
 	}
 
-	assertJSONEquals(t, `[
+	assertJSONEquals(t, `{"schema": [
 		{
 			"key": "Movie",
 			"value": {
@@ -525,5 +525,5 @@ func TestGetSchemaProcessing_RealisticGraph(t *testing.T) {
 			"key": "DIRECTED",
 			"value": {"type": "relationship"}
 		}
-	]`, getResultText(t, result))
+	]}`, getResultText(t, result))
 }

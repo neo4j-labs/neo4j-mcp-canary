@@ -21,8 +21,11 @@ func TestListGdsProcedures(t *testing.T) {
 	listGds := gds.ListGdsProceduresHandler(tc.Deps)
 	res := tc.CallTool(listGds, nil)
 
-	var procedures []map[string]any
-	tc.ParseJSONResponse(res, &procedures)
+	var response struct {
+		Procedures []map[string]any `json:"procedures"`
+	}
+	tc.ParseJSONResponse(res, &response)
+	procedures := response.Procedures
 	t.Run("should return some procedures", func(t *testing.T) {
 		// Should have GDS procedures since we enabled the plugin
 		if len(procedures) == 0 {
