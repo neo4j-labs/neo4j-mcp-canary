@@ -560,6 +560,81 @@ func TestWriteCypherHandler(t *testing.T) {
 			t.Errorf("expected 'write-cypher cancelled' prefix, got: %s", text.Text)
 		}
 	})
+
+	// EXPLAIN-prefixed query rejected: write-cypher would otherwise execute
+	// it literally, producing an empty-rows response with no error (EXPLAIN
+	// never returns rows) that looks like a silent no-op success. No
+	// ExecuteWriteQueryStreaming/QueryResultToJSON expectation is set, so
+	// gomock fails the test if the handler ever reaches the execution path.
+	t.Run("EXPLAIN-prefixed query rejected", func(t *testing.T) {
+		mockDB := db.NewMockService(ctrl)
+
+		deps := &tools.ToolDependencies{
+			DBService:        mockDB,
+			AnalyticsService: analyticsService,
+			CypherMaxRows:    1000,
+		}
+
+		handler := cypher.WriteCypherHandler(deps)
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
+				Arguments: map[string]any{"query": "EXPLAIN MATCH (n) RETURN n"},
+			},
+		}
+
+		result, err := handler(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result == nil || !result.IsError {
+			t.Fatalf("expected error result for EXPLAIN prefix, got: %+v", result)
+		}
+		text, ok := mcpsdk.AsTextContent(result.Content[0])
+		if !ok {
+			t.Fatalf("expected TextContent, got %T", result.Content[0])
+		}
+		if !strings.Contains(text.Text, "explain-cypher") {
+			t.Errorf("expected explain-cypher pointer in rejection message, got: %s", text.Text)
+		}
+	})
+
+	// PROFILE-prefixed query rejected: write-cypher would otherwise execute
+	// it literally, returning rows but silently discarding the profiling
+	// data (dbHits, rows, time per operator) the caller presumably wanted.
+	// No ExecuteWriteQueryStreaming/QueryResultToJSON expectation is set,
+	// so gomock fails the test if the handler ever reaches the execution
+	// path.
+	t.Run("PROFILE-prefixed query rejected", func(t *testing.T) {
+		mockDB := db.NewMockService(ctrl)
+
+		deps := &tools.ToolDependencies{
+			DBService:        mockDB,
+			AnalyticsService: analyticsService,
+			CypherMaxRows:    1000,
+		}
+
+		handler := cypher.WriteCypherHandler(deps)
+		request := &mcpsdk.CallToolRequest{
+			Params: &mcpsdk.CallToolParams{
+				Arguments: map[string]any{"query": "PROFILE MATCH (n) RETURN n"},
+			},
+		}
+
+		result, err := handler(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result == nil || !result.IsError {
+			t.Fatalf("expected error result for PROFILE prefix, got: %+v", result)
+		}
+		text, ok := mcpsdk.AsTextContent(result.Content[0])
+		if !ok {
+			t.Fatalf("expected TextContent, got %T", result.Content[0])
+		}
+		if !strings.Contains(text.Text, "profile-cypher") {
+			t.Errorf("expected profile-cypher pointer in rejection message, got: %s", text.Text)
+		}
+	})
 }
 
 func TestWriteCypherHandler_PopulatesStructuredContent(t *testing.T) {

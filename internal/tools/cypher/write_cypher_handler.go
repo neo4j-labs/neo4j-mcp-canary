@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
@@ -43,6 +44,32 @@ func handleWriteCypher(ctx context.Context, request *mcpsdk.CallToolRequest, dep
 		errMessage := "Query parameter is required and cannot be empty"
 		slog.Error(errMessage)
 		return mcpsdk.NewToolResultError(errMessage), nil
+	}
+
+	// write-cypher has no FirstKeyword("PROFILE") pre-flight the way
+	// read-cypher's GetQueryType does — it doesn't gate on query type at
+	// all, by design, so it would otherwise execute an EXPLAIN- or
+	// PROFILE-prefixed query literally. That's two silent failure modes:
+	// EXPLAIN produces zero rows (the plan lives on the summary, not the
+	// row stream) with no error, looking like a no-op success; PROFILE
+	// executes for real but the resulting profiling data was never
+	// captured or returned, looking like a plain write with no plan. Reject
+	// both explicitly and point at the tools built to do this properly.
+	switch database.FirstKeyword(Query) {
+	case "EXPLAIN":
+		slog.Info("rejected EXPLAIN query", "query", Query)
+		return mcpsdk.NewToolResultError(
+			"write-cypher rejected: EXPLAIN produces no rows on the execution path (the plan lives on the query " +
+				"summary, not the row stream), so this would silently return an empty result. Remove the EXPLAIN " +
+				"prefix and use explain-cypher instead to see the query plan without executing it.",
+		), nil
+	case "PROFILE":
+		slog.Info("rejected PROFILE query", "query", Query)
+		return mcpsdk.NewToolResultError(
+			"write-cypher rejected: PROFILE executes the query but write-cypher does not surface the resulting " +
+				"profiling data (dbHits, rows, time per operator). Remove the PROFILE prefix and use profile-cypher " +
+				"instead to run the query and get back both the results and the profiled plan.",
+		), nil
 	}
 
 	slog.Info("executing write cypher query", "query", Query)

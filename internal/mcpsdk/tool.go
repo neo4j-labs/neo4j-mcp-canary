@@ -90,18 +90,37 @@ func MaxLength(n int) PropertyOption {
 	return func(b *propertyBuilder) { b.schema.MaxLength = &n }
 }
 
+// Enum restricts a property to one of the given values.
+func Enum(values ...string) PropertyOption {
+	return func(b *propertyBuilder) {
+		enum := make([]any, len(values))
+		for i, v := range values {
+			enum[i] = v
+		}
+		b.schema.Enum = enum
+	}
+}
+
 // WithString declares a "string"-typed input property.
 func WithString(name string, opts ...PropertyOption) ToolOption {
-	return func(t *Tool) { addProperty(t, name, "string", opts) }
+	return func(t *Tool) { addProperty(t, name, "string", nil, opts) }
 }
 
 // WithObject declares an "object"-typed input property.
 func WithObject(name string, opts ...PropertyOption) ToolOption {
-	return func(t *Tool) { addProperty(t, name, "object", opts) }
+	return func(t *Tool) { addProperty(t, name, "object", nil, opts) }
 }
 
-func addProperty(t *Tool, name, schemaType string, opts []PropertyOption) {
-	b := &propertyBuilder{schema: &jsonschema.Schema{Type: schemaType}}
+// WithArray declares an "array"-typed input property whose items are of
+// itemType (for example "string").
+func WithArray(name, itemType string, opts ...PropertyOption) ToolOption {
+	return func(t *Tool) {
+		addProperty(t, name, "array", &jsonschema.Schema{Type: itemType}, opts)
+	}
+}
+
+func addProperty(t *Tool, name, schemaType string, items *jsonschema.Schema, opts []PropertyOption) {
+	b := &propertyBuilder{schema: &jsonschema.Schema{Type: schemaType, Items: items}}
 	for _, opt := range opts {
 		opt(b)
 	}

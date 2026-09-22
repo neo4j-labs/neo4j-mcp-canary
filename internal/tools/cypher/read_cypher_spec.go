@@ -47,7 +47,7 @@ type ReadCypherInput struct {
 // as the string "{}", which would then fail to unmarshal on the server side.
 func ReadCypherSpec() mcpsdk.Tool {
 	return mcpsdk.NewTool("read-cypher",
-		mcpsdk.WithDescription("read-cypher can run only read-only Cypher statements. For write operations (CREATE, MERGE, DELETE, SET, etc...), schema/admin commands, or PROFILE queries, use write-cypher instead."),
+		mcpsdk.WithDescription("read-cypher can run only read-only Cypher statements. For write operations (CREATE, MERGE, DELETE, SET, etc...) or schema/admin commands, use write-cypher instead. Use explain-cypher for a query plan, or profile-cypher for a profiled plan with runtime statistics."),
 		mcpsdk.WithString("query",
 			mcpsdk.Required(),
 			mcpsdk.Description("The read-only Cypher query to execute. Required."),

@@ -207,6 +207,62 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 			},
 			readonly: false,
 		},
+		{
+			Category: tools.CategoryCypher,
+			definition: mcpsdk.ServerTool{
+				Tool:    cypher.ExplainCypherSpec(),
+				Handler: cypher.ExplainCypherHandler(deps),
+			},
+			readonly: true,
+		},
+		{
+			Category: tools.CategoryCypher,
+			definition: mcpsdk.ServerTool{
+				Tool:    cypher.ProfileCypherSpec(),
+				Handler: cypher.ProfileCypherHandler(deps),
+			},
+			readonly: false,
+		},
+		{
+			Category: tools.CategoryCypher,
+			definition: mcpsdk.ServerTool{
+				Tool:    cypher.ListConstraintsAndIndexesSpec(),
+				Handler: cypher.ListConstraintsAndIndexesHandler(deps),
+			},
+			readonly: true,
+		},
+		{
+			Category: tools.CategoryCypher,
+			definition: mcpsdk.ServerTool{
+				Tool:    cypher.CreateConstraintSpec(),
+				Handler: cypher.CreateConstraintHandler(deps),
+			},
+			readonly: false,
+		},
+		{
+			Category: tools.CategoryCypher,
+			definition: mcpsdk.ServerTool{
+				Tool:    cypher.DropConstraintSpec(),
+				Handler: cypher.DropConstraintHandler(deps),
+			},
+			readonly: false,
+		},
+		{
+			Category: tools.CategoryCypher,
+			definition: mcpsdk.ServerTool{
+				Tool:    cypher.CreateIndexSpec(),
+				Handler: cypher.CreateIndexHandler(deps),
+			},
+			readonly: false,
+		},
+		{
+			Category: tools.CategoryCypher,
+			definition: mcpsdk.ServerTool{
+				Tool:    cypher.DropIndexSpec(),
+				Handler: cypher.DropIndexHandler(deps),
+			},
+			readonly: false,
+		},
 		// GDS Category/Section
 		{
 			Category: tools.CategoryGDS,

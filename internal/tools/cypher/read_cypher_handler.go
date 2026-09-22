@@ -35,7 +35,7 @@ import (
 // one place also keeps it in lockstep with the identical description on the
 // tool itself (see read_cypher_spec.go) so the message the caller sees when
 // refused matches the advertised contract.
-const readCypherWriteRedirectMessage = "read-cypher can only run read-only Cypher statements. For write operations (CREATE, MERGE, DELETE, SET, etc...), schema/admin commands, or PROFILE queries, use write-cypher instead."
+const readCypherWriteRedirectMessage = "read-cypher can only run read-only Cypher statements. For write operations (CREATE, MERGE, DELETE, SET, etc...) or schema/admin commands, use write-cypher instead."
 
 // neo4jAccessModeErrorCode is the server-side error code the Neo4j driver
 // surfaces when a write clause runs inside a read-only session. We match on
@@ -109,10 +109,8 @@ func handleReadCypher(ctx context.Context, request *mcpsdk.CallToolRequest, deps
 		if errors.Is(err, database.ErrExplainUnsupported) {
 			slog.Info("rejected EXPLAIN query", "query", Query)
 			return mcpsdk.NewToolResultError(
-				"read-cypher does not surface query plans. Remove the EXPLAIN prefix and retry; " +
-					"runaway-query protection is already provided by the planner-estimate guard " +
-					"(NEO4J_CYPHER_MAX_ESTIMATED_ROWS) and the execution timeout. For a profiled " +
-					"plan with runtime statistics, use write-cypher with PROFILE.",
+				"read-cypher does not surface query plans. Remove the EXPLAIN prefix and retry, or use " +
+					"explain-cypher for the query plan, or profile-cypher for a profiled plan with runtime statistics.",
 			), nil
 		}
 		slog.Error("error classifying cypher query", "error", err)
@@ -120,6 +118,18 @@ func handleReadCypher(ctx context.Context, request *mcpsdk.CallToolRequest, deps
 	}
 
 	if queryType != neo4j.QueryTypeReadOnly { // only queryType == "r" are allowed in read-cypher
+		// PROFILE gets its own message rather than the generic write-redirect:
+		// write-cypher no longer accepts a PROFILE prefix either (see
+		// write_cypher_handler.go), so "use write-cypher instead" would be a
+		// circular, wrong redirect for this one case.
+		if database.FirstKeyword(Query) == "PROFILE" {
+			slog.Info("rejected PROFILE query", "query", Query)
+			return mcpsdk.NewToolResultError(
+				"read-cypher does not execute PROFILE queries and write-cypher no longer accepts a PROFILE " +
+					"prefix either. Use profile-cypher instead — it runs the query and returns both the results " +
+					"and the profiled plan (dbHits, rows, time per operator).",
+			), nil
+		}
 		slog.Error("rejected non-read query", "type", queryType, "query", Query)
 		return mcpsdk.NewToolResultError(readCypherWriteRedirectMessage), nil
 	}

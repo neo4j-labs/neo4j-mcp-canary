@@ -513,10 +513,11 @@ func TestReadCypherHandler(t *testing.T) {
 	})
 
 	// PROFILE redirect: the service-side pre-flight in GetQueryType now classifies
-	// PROFILE as QueryTypeWriteOnly, so the handler returns the standard policy
-	// message rather than leaking the "conflicting execution modes" driver error.
-	// The behavioural check here is the same as the existing "non-read query type"
-	// case — we're just pinning the PROFILE → WriteOnly classification in a test.
+	// PROFILE as QueryTypeWriteOnly, so the handler returns a PROFILE-specific
+	// message pointing at profile-cypher rather than leaking the "conflicting
+	// execution modes" driver error, or the generic write-cypher redirect (which
+	// would be circular now that write-cypher also rejects PROFILE — see
+	// write_cypher_handler.go).
 	t.Run("PROFILE query rejected with policy message", func(t *testing.T) {
 		mockDB := db.NewMockService(ctrl)
 		mockDB.EXPECT().
@@ -552,8 +553,8 @@ func TestReadCypherHandler(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected TextContent, got %T", result.Content[0])
 		}
-		if !strings.Contains(text.Text, "use write-cypher") {
-			t.Errorf("expected clean policy message redirecting to write-cypher, got: %s", text.Text)
+		if !strings.Contains(text.Text, "profile-cypher") {
+			t.Errorf("expected clean policy message redirecting to profile-cypher, got: %s", text.Text)
 		}
 		if strings.Contains(text.Text, "conflicting execution modes") {
 			t.Errorf("raw driver error leaked through; expected clean policy message, got: %s", text.Text)
@@ -1070,15 +1071,12 @@ func TestReadCypherHandler(t *testing.T) {
 	// database.ErrExplainUnsupported sentinel from GetQueryType rather than a
 	// QueryType verdict. The handler must catch that sentinel with errors.Is
 	// and return the targeted "remove the EXPLAIN prefix" message, not the
-	// generic write-cypher redirect. We pin three substrings so the message
+	// generic write-cypher redirect. We pin two substrings so the message
 	// can't silently drift into something less actionable:
 	//
 	//   - "Remove the EXPLAIN prefix" is the concrete remediation
-	//   - "NEO4J_CYPHER_MAX_ESTIMATED_ROWS" and "execution timeout" together
-	//     signal the safety rails that replace EXPLAIN's common use case
-	//     (runaway-query guarding)
-	//   - "write-cypher with PROFILE" gives callers the escape hatch for
-	//     callers who actually want a plan (with runtime stats).
+	//   - "explain-cypher" and "profile-cypher" point callers at the tools
+	//     built to do this properly (plan only, or plan + runtime stats).
 	//
 	// We also regression-guard against the pre-fix behaviour (empty rows) by
 	// setting no ExecuteReadQueryStreaming expectation — if the handler reaches
@@ -1116,11 +1114,11 @@ func TestReadCypherHandler(t *testing.T) {
 		if !strings.Contains(text.Text, "Remove the EXPLAIN prefix") {
 			t.Errorf("expected 'Remove the EXPLAIN prefix' remediation, got: %s", text.Text)
 		}
-		if !strings.Contains(text.Text, "NEO4J_CYPHER_MAX_ESTIMATED_ROWS") {
-			t.Errorf("expected NEO4J_CYPHER_MAX_ESTIMATED_ROWS safety-rail mention, got: %s", text.Text)
+		if !strings.Contains(text.Text, "explain-cypher") {
+			t.Errorf("expected explain-cypher pointer in message, got: %s", text.Text)
 		}
-		if !strings.Contains(text.Text, "write-cypher with PROFILE") {
-			t.Errorf("expected write-cypher+PROFILE escape hatch in message, got: %s", text.Text)
+		if !strings.Contains(text.Text, "profile-cypher") {
+			t.Errorf("expected profile-cypher pointer in message, got: %s", text.Text)
 		}
 		// Regression guard against the generic policy-refusal message — if the
 		// handler falls back to readCypherWriteRedirectMessage the caller gets

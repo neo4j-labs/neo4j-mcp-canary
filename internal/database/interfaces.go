@@ -121,6 +121,21 @@ type QueryExecutor interface {
 	// or when the EstimatedRows key is missing from the plan arguments. Callers
 	// should treat 0 as "no estimate, skip the guard" rather than "estimated zero rows".
 	EstimateRowCount(ctx context.Context, cypher string, params map[string]any) (int64, error)
+
+	// ExplainQuery prefixes cypher with EXPLAIN and returns the resulting plan.
+	// This never executes the statement — safe for read and write statements
+	// alike, since EXPLAIN only ever produces a plan. Returns (nil, nil) when
+	// EXPLAIN produced no plan (uncommon for administrative commands the
+	// planner doesn't model as a regular query plan).
+	ExplainQuery(ctx context.Context, cypher string, params map[string]any) (neo4j.Plan, error)
+
+	// ExecuteProfileQueryStreaming prefixes cypher with PROFILE and executes
+	// it in a write-capable session — PROFILE always executes the statement
+	// for real, the same convention GetQueryType's FirstKeyword=="PROFILE"
+	// short-circuit already relies on. Returns both the row result (same row
+	// and byte cap semantics as ExecuteWriteQueryStreaming) and the profiled
+	// plan with runtime statistics (dbHits, rows, time per operator).
+	ExecuteProfileQueryStreaming(ctx context.Context, cypher string, params map[string]any, maxRows, maxBytes int) (*QueryResult, neo4j.QueryProfile, error)
 }
 
 // RecordFormatter defines the interface for formatting Neo4j records
