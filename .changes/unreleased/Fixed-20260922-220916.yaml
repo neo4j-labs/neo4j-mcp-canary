@@ -1,3 +1,0 @@
-kind: Fixed
-body: get-schema, list-gds-procedures, and explain-cypher advertised a JSON outputSchema whose top-level type was not "object" (a bare array for the first two, a bare $ref for the third). Claude Desktop validates every tool's outputSchema at startup and rejected the whole tools/list response over this, so the server failed to start at all in Claude Desktop even though it worked fine over stdio with other clients. get-schema and list-gds-procedures now wrap their result arrays in a named object field (schema / procedures respectively), and explain-cypher's schema declares its own top-level object shape instead of a bare $ref.
-time: 2026-09-22T22:09:16.672265+01:00
