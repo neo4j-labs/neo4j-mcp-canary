@@ -96,12 +96,31 @@ func (s *Service) executeBuffered(ctx context.Context, cypher string, params map
 // See QueryExecutor.ExecuteReadQueryStreaming on the interface for the full
 // contract.
 func (s *Service) ExecuteReadQueryStreaming(ctx context.Context, cypher string, params map[string]any, maxRows, maxBytes int) (*database.QueryResult, error) {
-	return s.executeStreaming(ctx, cypher, params, maxRows, maxBytes)
+	result, _, err := s.executeStreaming(ctx, cypher, params, maxRows, maxBytes)
+	return result, err
 }
 
 // ExecuteWriteQueryStreaming mirrors ExecuteReadQueryStreaming for writes.
 func (s *Service) ExecuteWriteQueryStreaming(ctx context.Context, cypher string, params map[string]any, maxRows, maxBytes int) (*database.QueryResult, error) {
-	return s.executeStreaming(ctx, cypher, params, maxRows, maxBytes)
+	result, _, err := s.executeStreaming(ctx, cypher, params, maxRows, maxBytes)
+	return result, err
+}
+
+// ExecuteProfileQueryStreaming implements QueryExecutor.ExecuteProfileQueryStreaming
+// on top of the Query API, matching Neo4jService.ExecuteProfileQueryStreaming's
+// contract: PROFILE always executes (there is no separate read/write routing
+// concern on this transport — see executeBuffered's doc comment).
+func (s *Service) ExecuteProfileQueryStreaming(ctx context.Context, cypher string, params map[string]any, maxRows, maxBytes int) (*database.QueryResult, neo4j.QueryProfile, error) {
+	profiledQuery := strings.Join([]string{"PROFILE", cypher}, " ")
+	result, summary, err := s.executeStreaming(ctx, profiledQuery, params, maxRows, maxBytes)
+	if err != nil {
+		return nil, nil, err
+	}
+	var profile neo4j.QueryProfile
+	if summary != nil && summary.ProfiledQueryPlan != nil {
+		profile = &queryAPIProfile{op: summary.ProfiledQueryPlan}
+	}
+	return result, profile, nil
 }
 
 // executeStreaming is the shared implementation for the read and write
@@ -117,15 +136,15 @@ func (s *Service) ExecuteWriteQueryStreaming(ctx context.Context, cypher string,
 // early return — see query-go-sdk's StreamResult.Records() doc comment), so
 // unlike the Bolt path's explicit res.Consume, no explicit Close call is
 // needed here on truncation.
-func (s *Service) executeStreaming(ctx context.Context, cypher string, params map[string]any, maxRows, maxBytes int) (*database.QueryResult, error) {
+func (s *Service) executeStreaming(ctx context.Context, cypher string, params map[string]any, maxRows, maxBytes int) (*database.QueryResult, *query.StreamSummary, error) {
 	svc, err := s.newClient(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build query api client: %w", err)
+		return nil, nil, fmt.Errorf("failed to build query api client: %w", err)
 	}
 
 	stream, err := svc.ExecuteStream(ctx, cypher, params)
 	if err != nil {
-		return nil, wrapQueryAPIError(err)
+		return nil, nil, wrapQueryAPIError(err)
 	}
 
 	records := make([]*neo4j.Record, 0)
@@ -135,7 +154,7 @@ func (s *Service) executeStreaming(ctx context.Context, cypher string, params ma
 
 	for rec, recErr := range stream.Records() {
 		if recErr != nil {
-			return nil, wrapQueryAPIError(recErr)
+			return nil, nil, wrapQueryAPIError(recErr)
 		}
 		record := convertRecord(rec)
 
@@ -170,6 +189,17 @@ func (s *Service) executeStreaming(ctx context.Context, cypher string, params ma
 		records = append(records, record)
 	}
 
+	// stream.Summary() is only populated once Records() has been drained to
+	// completion (see explainSummary's doc comment) — an early break on
+	// truncation already closes the stream without a final Summary event,
+	// so summary stays nil in that case. Only ExecuteProfileQueryStreaming's
+	// caller cares about this; ExecuteReadQueryStreaming/
+	// ExecuteWriteQueryStreaming both discard it regardless.
+	var summary *query.StreamSummary
+	if !truncated {
+		summary = stream.Summary()
+	}
+
 	return &database.QueryResult{
 		Records:          records,
 		Truncated:        truncated,
@@ -178,7 +208,7 @@ func (s *Service) executeStreaming(ctx context.Context, cypher string, params ma
 		MaxRows:          maxRows,
 		ByteCount:        byteCount,
 		MaxBytes:         maxBytes,
-	}, nil
+	}, summary, nil
 }
 
 // GetQueryType prefixes cypher with EXPLAIN and reports whether it is
@@ -227,6 +257,23 @@ func (s *Service) EstimateRowCount(ctx context.Context, cypher string, params ma
 		return 0, nil
 	}
 	return database.ExtractEstimatedRows(summary.QueryPlan.Arguments), nil
+}
+
+// ExplainQuery implements QueryExecutor.ExplainQuery on top of the Query
+// API, matching the contract of Neo4jService.ExplainQuery. Has no
+// FirstKeyword pre-flight of its own — explain_cypher_handler.go rejects a
+// caller-supplied EXPLAIN/PROFILE prefix before this is ever called.
+func (s *Service) ExplainQuery(ctx context.Context, cypher string, params map[string]any) (neo4j.Plan, error) {
+	explainedQuery := strings.Join([]string{"EXPLAIN", cypher}, " ")
+
+	summary, err := s.explainSummary(ctx, explainedQuery, params)
+	if err != nil {
+		return nil, fmt.Errorf("error during ExplainQuery: %w", err)
+	}
+	if summary.QueryPlan == nil {
+		return nil, nil
+	}
+	return &queryAPIPlan{op: summary.QueryPlan}, nil
 }
 
 // explainSummary runs an already-EXPLAIN-prefixed statement via

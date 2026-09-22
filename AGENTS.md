@@ -104,6 +104,7 @@ floor and fail fast against anything older or a bare classic version.
 
 ## Code style
 
+- Always create a new branch before making changes
 - No comments unless they explain a non-obvious *why* (a hidden constraint,
   a workaround, a subtle invariant) — this codebase already follows that
   discipline; match it rather than adding narration comments.
@@ -118,7 +119,7 @@ floor and fail fast against anything older or a bare classic version.
 
   (see `addlicense` at the repo root for the canonical text).
 - Run `gofmt -w` before finishing — CI/reviewers expect clean formatting.
-
+  
 ## Changelog (changie)
 
 User-facing changes (new features, behavior changes, fixes to shipped

@@ -105,6 +105,34 @@
       "description": "Execute arbitrary Cypher (write mode)"
     },
     {
+      "name": "explain-cypher",
+      "description": "Show the query plan for a Cypher statement without executing it"
+    },
+    {
+      "name": "profile-cypher",
+      "description": "Execute a Cypher statement and return results plus a profiled plan with runtime statistics"
+    },
+    {
+      "name": "list-constraints-and-indexes",
+      "description": "List the database's constraints and indexes"
+    },
+    {
+      "name": "create-constraint",
+      "description": "Create a uniqueness, key, or property-existence constraint"
+    },
+    {
+      "name": "drop-constraint",
+      "description": "Drop a constraint by name"
+    },
+    {
+      "name": "create-index",
+      "description": "Create a range, text, point, or lookup index"
+    },
+    {
+      "name": "drop-index",
+      "description": "Drop an index by name"
+    },
+    {
       "name": "list-gds-procedures",
       "description": "List GDS procedures available in the instance"
     }

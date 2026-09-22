@@ -40,8 +40,11 @@ func TestToolRegister(t *testing.T) {
 
 		// Expected tools that should be registered
 		// update this number when a tool is added or removed.
-		// Current tools: get-schema, read-cypher, write-cypher, list-gds-procedures, give-feedback
-		expectedTotalToolsCount := 5
+		// Current tools: get-schema, read-cypher, write-cypher, explain-cypher,
+		// profile-cypher, list-constraints-and-indexes, create-constraint,
+		// drop-constraint, create-index, drop-index, list-gds-procedures,
+		// give-feedback
+		expectedTotalToolsCount := 12
 
 		err := s.Start()
 		if err != nil {
@@ -69,8 +72,9 @@ func TestToolRegister(t *testing.T) {
 
 		// Expected tools that should be registered
 		// update this number when a tool is added or removed.
-		// Readonly tools: get-schema, read-cypher, list-gds-procedures, give-feedback
-		expectedTotalToolsCount := 4
+		// Readonly tools: get-schema, read-cypher, explain-cypher,
+		// list-constraints-and-indexes, list-gds-procedures, give-feedback
+		expectedTotalToolsCount := 6
 
 		err := s.Start()
 		if err != nil {
@@ -98,8 +102,11 @@ func TestToolRegister(t *testing.T) {
 
 		// Expected tools that should be registered
 		// update this number when a tool is added or removed.
-		// All tools: get-schema, read-cypher, write-cypher, list-gds-procedures, give-feedback
-		expectedTotalToolsCount := 5
+		// All tools: get-schema, read-cypher, write-cypher, explain-cypher,
+		// profile-cypher, list-constraints-and-indexes, create-constraint,
+		// drop-constraint, create-index, drop-index, list-gds-procedures,
+		// give-feedback
+		expectedTotalToolsCount := 12
 
 		err := s.Start()
 		if err != nil {
@@ -127,8 +134,10 @@ func TestToolRegister(t *testing.T) {
 
 		// Expected tools that should be registered
 		// update this number when a tool is added or removed.
-		// Non-GDS tools: get-schema, read-cypher, write-cypher, give-feedback
-		expectedTotalToolsCount := 4
+		// Non-GDS tools: get-schema, read-cypher, write-cypher, explain-cypher,
+		// profile-cypher, list-constraints-and-indexes, create-constraint,
+		// drop-constraint, create-index, drop-index, give-feedback
+		expectedTotalToolsCount := 11
 
 		err := s.Start()
 		if err != nil {

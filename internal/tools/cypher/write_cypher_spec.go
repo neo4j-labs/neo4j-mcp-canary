@@ -29,10 +29,10 @@ type WriteCypherInput struct {
 // the default value could trigger an unintended mutation.
 func WriteCypherSpec() mcpsdk.Tool {
 	return mcpsdk.NewTool("write-cypher",
-		mcpsdk.WithDescription("write-cypher executes any arbitrary Cypher query, with write access, against the user-configured Neo4j database."),
+		mcpsdk.WithDescription("write-cypher executes any arbitrary Cypher query, with write access, against the user-configured Neo4j database. It does not accept EXPLAIN- or PROFILE-prefixed queries — use explain-cypher or profile-cypher instead."),
 		mcpsdk.WithString("query",
 			mcpsdk.Required(),
-			mcpsdk.Description("The Cypher query to execute. Required. May contain write operations (CREATE, MERGE, DELETE, SET) and schema or admin commands."),
+			mcpsdk.Description("The Cypher query to execute. Required. May contain write operations (CREATE, MERGE, DELETE, SET) and schema or admin commands. Must not be prefixed with EXPLAIN or PROFILE."),
 		),
 		mcpsdk.WithObject("params",
 			mcpsdk.Description("Optional parameters to bind to $-placeholders in the query. Must be a JSON object. Omit when the query has no placeholders."),

@@ -228,25 +228,14 @@ func (s *Neo4jService) EstimateRowCount(ctx context.Context, cypher string, para
 		return 0, nil
 	}
 
-	explainedQuery := strings.Join([]string{"EXPLAIN", cypher}, " ")
-	queryOptions := s.buildQueryOptions(ctx)
-
-	res, err := neo4j.ExecuteQuery(ctx, s.driver, explainedQuery, params, neo4j.EagerResultTransformer, queryOptions...)
+	summary, err := s.runExplain(ctx, cypher, params)
 	if err != nil {
-		// Same scrub as GetQueryType — in practice EstimateRowCount should rarely
-		// surface a syntax error (the earlier GetQueryType call would have caught
-		// it), but schema races and transient driver errors can still produce
-		// messages that quote our wrapped query. Applying the sanitiser uniformly
-		// keeps the user-facing error consistent across both EXPLAIN-wrapping
-		// paths rather than cleaning one and leaking from the other.
-		wrappedErr := fmt.Errorf("error during EstimateRowCount: %w", sanitizeExplainPrefix(err))
-		slog.Error("Error during EstimateRowCount", "error", wrappedErr)
-		return 0, wrappedErr
+		return 0, fmt.Errorf("error during EstimateRowCount: %w", err)
 	}
-	if res.Summary == nil {
+	if summary == nil {
 		return 0, nil
 	}
-	plan := res.Summary.Plan()
+	plan := summary.Plan()
 	if plan == nil {
 		// EXPLAIN did not produce a plan — unusual but possible for administrative
 		// commands or edge cases the planner doesn't model. Treat as "no estimate"
@@ -255,6 +244,43 @@ func (s *Neo4jService) EstimateRowCount(ctx context.Context, cypher string, para
 		return 0, nil
 	}
 	return ExtractEstimatedRows(plan.Arguments()), nil
+}
+
+// runExplain prepends EXPLAIN to cypher, executes it, and returns the
+// resulting ResultSummary. Shared by EstimateRowCount and ExplainQuery so
+// the "prepend EXPLAIN, run, read Summary" round trip exists in one place.
+// Not used by GetQueryType above: that call site also needs QueryType()
+// (not Plan()) and its own error-message prefix, so folding it in would
+// widen this helper's contract for no real duplication saved.
+func (s *Neo4jService) runExplain(ctx context.Context, cypher string, params map[string]any) (neo4j.ResultSummary, error) {
+	explainedQuery := strings.Join([]string{"EXPLAIN", cypher}, " ")
+	queryOptions := s.buildQueryOptions(ctx)
+
+	res, err := neo4j.ExecuteQuery(ctx, s.driver, explainedQuery, params, neo4j.EagerResultTransformer, queryOptions...)
+	if err != nil {
+		// Scrub the "EXPLAIN " we prepended from the driver's error, same as
+		// GetQueryType — see its comment for the full rationale.
+		return nil, sanitizeExplainPrefix(err)
+	}
+	return res.Summary, nil
+}
+
+// ExplainQuery implements QueryExecutor.ExplainQuery. Unlike EstimateRowCount
+// and GetQueryType, this has no FirstKeyword("EXPLAIN"/"PROFILE") pre-flight
+// of its own — explain_cypher_handler.go rejects a caller-supplied EXPLAIN/
+// PROFILE prefix before this is ever called, so cypher here is guaranteed
+// prefix-free.
+func (s *Neo4jService) ExplainQuery(ctx context.Context, cypher string, params map[string]any) (neo4j.Plan, error) {
+	summary, err := s.runExplain(ctx, cypher, params)
+	if err != nil {
+		wrappedErr := fmt.Errorf("error during ExplainQuery: %w", err)
+		slog.Error("Error during ExplainQuery", "error", wrappedErr)
+		return nil, wrappedErr
+	}
+	if summary == nil {
+		return nil, fmt.Errorf("error during ExplainQuery: no summary returned for explained query")
+	}
+	return summary.Plan(), nil
 }
 
 // ExtractEstimatedRows pulls the root operator's EstimatedRows out of the plan
@@ -365,13 +391,34 @@ const (
 // query that behaviour hangs the MCP client for minutes while the driver
 // serialises the full payload. The session API lets us iterate with an early break.
 func (s *Neo4jService) ExecuteReadQueryStreaming(ctx context.Context, cypher string, params map[string]any, maxRows, maxBytes int) (*QueryResult, error) {
-	return s.executeStreaming(ctx, cypher, params, maxRows, maxBytes, accessRead)
+	result, _, err := s.executeStreaming(ctx, cypher, params, maxRows, maxBytes, accessRead)
+	return result, err
 }
 
 // ExecuteWriteQueryStreaming runs a Cypher query in a write transaction, with
 // the same row and byte cap semantics as ExecuteReadQueryStreaming.
 func (s *Neo4jService) ExecuteWriteQueryStreaming(ctx context.Context, cypher string, params map[string]any, maxRows, maxBytes int) (*QueryResult, error) {
-	return s.executeStreaming(ctx, cypher, params, maxRows, maxBytes, accessWrite)
+	result, _, err := s.executeStreaming(ctx, cypher, params, maxRows, maxBytes, accessWrite)
+	return result, err
+}
+
+// ExecuteProfileQueryStreaming implements QueryExecutor.ExecuteProfileQueryStreaming.
+// PROFILE always executes in a write-capable session — see GetQueryType's
+// FirstKeyword=="PROFILE" short-circuit for the same convention. Like
+// ExplainQuery, this has no FirstKeyword pre-flight of its own:
+// profile_cypher_handler.go rejects a caller-supplied EXPLAIN/PROFILE prefix
+// before this is ever called.
+func (s *Neo4jService) ExecuteProfileQueryStreaming(ctx context.Context, cypher string, params map[string]any, maxRows, maxBytes int) (*QueryResult, neo4j.QueryProfile, error) {
+	profiledQuery := strings.Join([]string{"PROFILE", cypher}, " ")
+	result, summary, err := s.executeStreaming(ctx, profiledQuery, params, maxRows, maxBytes, accessWrite)
+	if err != nil {
+		return nil, nil, err
+	}
+	var profile neo4j.QueryProfile
+	if summary != nil {
+		profile = summary.QueryProfile()
+	}
+	return result, profile, nil
 }
 
 // executeStreaming is the shared implementation for the read and write streaming
@@ -386,7 +433,17 @@ func (s *Neo4jService) ExecuteWriteQueryStreaming(ctx context.Context, cypher st
 // TruncationReason on the returned QueryResult indicates which one fired so the
 // MCP-facing hint can steer the caller toward the right remediation (smaller
 // LIMIT for rows, narrower projection for bytes).
-func (s *Neo4jService) executeStreaming(ctx context.Context, cypher string, params map[string]any, maxRows, maxBytes int, mode accessMode) (*QueryResult, error) {
+// streamOutcome bundles the row result with the ResultSummary consumed at
+// the end of streaming, so executeStreaming can hand both back to callers
+// that need the summary (ExecuteProfileQueryStreaming) without changing the
+// contract for the two that don't (ExecuteReadQueryStreaming/
+// ExecuteWriteQueryStreaming just discard it).
+type streamOutcome struct {
+	result  *QueryResult
+	summary neo4j.ResultSummary
+}
+
+func (s *Neo4jService) executeStreaming(ctx context.Context, cypher string, params map[string]any, maxRows, maxBytes int, mode accessMode) (*QueryResult, neo4j.ResultSummary, error) {
 	sessionConfig := neo4j.SessionConfig{
 		DatabaseName: s.database,
 	}
@@ -429,6 +486,7 @@ func (s *Neo4jService) executeStreaming(ctx context.Context, cypher string, para
 		truncated := false
 		truncationReason := TruncationReasonNone
 		byteCount := 0
+		var summary neo4j.ResultSummary
 
 	streamLoop:
 		for res.Next(ctx) {
@@ -461,8 +519,10 @@ func (s *Neo4jService) executeStreaming(ctx context.Context, cypher string, para
 				case byteCount+len(recordBytes) > maxBytes:
 					truncated = true
 					truncationReason = TruncationReasonBytes
-					if _, discardErr := res.Consume(ctx); discardErr != nil {
+					if s, discardErr := res.Consume(ctx); discardErr != nil {
 						slog.Debug("discard after truncation returned an error (non-fatal)", "error", discardErr)
+					} else {
+						summary = s
 					}
 					break streamLoop
 				default:
@@ -486,8 +546,10 @@ func (s *Neo4jService) executeStreaming(ctx context.Context, cypher string, para
 				// on the wire and the server stops pushing records. Errors here are
 				// non-fatal — we already have the rows we want to return — so they
 				// are logged at debug level and otherwise swallowed.
-				if _, discardErr := res.Consume(ctx); discardErr != nil {
+				if s, discardErr := res.Consume(ctx); discardErr != nil {
 					slog.Debug("discard after truncation returned an error (non-fatal)", "error", discardErr)
+				} else {
+					summary = s
 				}
 				break
 			}
@@ -497,14 +559,30 @@ func (s *Neo4jService) executeStreaming(ctx context.Context, cypher string, para
 			return nil, err
 		}
 
-		return &QueryResult{
-			Records:          records,
-			Truncated:        truncated,
-			TruncationReason: truncationReason,
-			RowCount:         len(records),
-			MaxRows:          maxRows,
-			ByteCount:        byteCount,
-			MaxBytes:         maxBytes,
+		// On natural exhaustion (no truncation branch above already consumed
+		// the stream), Consume the now-fully-iterated result to obtain the
+		// ResultSummary — needed by ExecuteProfileQueryStreaming's caller for
+		// the profiled plan. Safe/cheap to call after full manual iteration:
+		// there's nothing left on the wire to discard.
+		if !truncated {
+			if s, consumeErr := res.Consume(ctx); consumeErr != nil {
+				slog.Debug("consume after full iteration returned an error (non-fatal)", "error", consumeErr)
+			} else {
+				summary = s
+			}
+		}
+
+		return &streamOutcome{
+			result: &QueryResult{
+				Records:          records,
+				Truncated:        truncated,
+				TruncationReason: truncationReason,
+				RowCount:         len(records),
+				MaxRows:          maxRows,
+				ByteCount:        byteCount,
+				MaxBytes:         maxBytes,
+			},
+			summary: summary,
 		}, nil
 	}
 
@@ -527,21 +605,21 @@ func (s *Neo4jService) executeStreaming(ctx context.Context, cypher string, para
 		// the user-facing message with the configured timeout value.
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			slog.Info("streaming query cancelled", "reason", err)
-			return nil, err
+			return nil, nil, err
 		}
 		wrapped := fmt.Errorf("failed to execute streaming query: %w", err)
 		slog.Error("Error in executeStreaming", "error", wrapped)
-		return nil, wrapped
+		return nil, nil, wrapped
 	}
 
-	result, ok := raw.(*QueryResult)
+	outcome, ok := raw.(*streamOutcome)
 	if !ok {
-		// Defensive — the work function above only ever returns *QueryResult, so
+		// Defensive — the work function above only ever returns *streamOutcome, so
 		// this branch should be unreachable. If we ever reach it we'd rather surface
 		// a clear error than panic on a bad type assertion.
-		return nil, fmt.Errorf("unexpected return type from transaction work: %T", raw)
+		return nil, nil, fmt.Errorf("unexpected return type from transaction work: %T", raw)
 	}
-	return result, nil
+	return outcome.result, outcome.summary, nil
 }
 
 // Neo4jRecordsToJSON converts Neo4j records to JSON string. It delegates to

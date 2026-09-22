@@ -73,7 +73,7 @@ func TestHTTPPerRequestToolSelection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ListTools: %v", err)
 		}
-		assert.Len(t, res.Tools, 5)
+		assert.Len(t, res.Tools, 12)
 	})
 
 	t.Run("X-MCP-Tools narrows tools/list and rejects excluded tools/call", func(t *testing.T) {

@@ -42,6 +42,37 @@ func (m *MockService) EXPECT() *MockServiceMockRecorder {
 	return m.recorder
 }
 
+// EstimateRowCount mocks base method.
+func (m *MockService) EstimateRowCount(ctx context.Context, cypher string, params map[string]any) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "EstimateRowCount", ctx, cypher, params)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// EstimateRowCount indicates an expected call of EstimateRowCount.
+func (mr *MockServiceMockRecorder) EstimateRowCount(ctx, cypher, params any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EstimateRowCount", reflect.TypeOf((*MockService)(nil).EstimateRowCount), ctx, cypher, params)
+}
+
+// ExecuteProfileQueryStreaming mocks base method.
+func (m *MockService) ExecuteProfileQueryStreaming(ctx context.Context, cypher string, params map[string]any, maxRows, maxBytes int) (*database.QueryResult, neo4j.QueryProfile, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExecuteProfileQueryStreaming", ctx, cypher, params, maxRows, maxBytes)
+	ret0, _ := ret[0].(*database.QueryResult)
+	ret1, _ := ret[1].(neo4j.QueryProfile)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// ExecuteProfileQueryStreaming indicates an expected call of ExecuteProfileQueryStreaming.
+func (mr *MockServiceMockRecorder) ExecuteProfileQueryStreaming(ctx, cypher, params, maxRows, maxBytes any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExecuteProfileQueryStreaming", reflect.TypeOf((*MockService)(nil).ExecuteProfileQueryStreaming), ctx, cypher, params, maxRows, maxBytes)
+}
+
 // ExecuteReadQuery mocks base method.
 func (m *MockService) ExecuteReadQuery(ctx context.Context, cypher string, params map[string]any) ([]*neo4j.Record, error) {
 	m.ctrl.T.Helper()
@@ -102,6 +133,21 @@ func (mr *MockServiceMockRecorder) ExecuteWriteQueryStreaming(ctx, cypher, param
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExecuteWriteQueryStreaming", reflect.TypeOf((*MockService)(nil).ExecuteWriteQueryStreaming), ctx, cypher, params, maxRows, maxBytes)
 }
 
+// ExplainQuery mocks base method.
+func (m *MockService) ExplainQuery(ctx context.Context, cypher string, params map[string]any) (neo4j.Plan, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExplainQuery", ctx, cypher, params)
+	ret0, _ := ret[0].(neo4j.Plan)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ExplainQuery indicates an expected call of ExplainQuery.
+func (mr *MockServiceMockRecorder) ExplainQuery(ctx, cypher, params any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExplainQuery", reflect.TypeOf((*MockService)(nil).ExplainQuery), ctx, cypher, params)
+}
+
 // GetQueryType mocks base method.
 func (m *MockService) GetQueryType(ctx context.Context, cypher string, params map[string]any) (neo4j.QueryType, error) {
 	m.ctrl.T.Helper()
@@ -115,21 +161,6 @@ func (m *MockService) GetQueryType(ctx context.Context, cypher string, params ma
 func (mr *MockServiceMockRecorder) GetQueryType(ctx, cypher, params any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetQueryType", reflect.TypeOf((*MockService)(nil).GetQueryType), ctx, cypher, params)
-}
-
-// EstimateRowCount mocks base method.
-func (m *MockService) EstimateRowCount(ctx context.Context, cypher string, params map[string]any) (int64, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "EstimateRowCount", ctx, cypher, params)
-	ret0, _ := ret[0].(int64)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// EstimateRowCount indicates an expected call of EstimateRowCount.
-func (mr *MockServiceMockRecorder) EstimateRowCount(ctx, cypher, params any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EstimateRowCount", reflect.TypeOf((*MockService)(nil).EstimateRowCount), ctx, cypher, params)
 }
 
 // Neo4jRecordsToJSON mocks base method.
