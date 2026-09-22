@@ -14,18 +14,28 @@ import (
 // type) isn't backed by a Go struct, so this is hand-written rather than
 // reflected. (jsonschema-go is a generic JSON Schema library, not an MCP
 // SDK, so importing it here doesn't violate mcpsdk's "only package allowed
-// to import an MCP SDK directly" boundary.)
+// to import an MCP SDK directly" boundary.) The procedure list is wrapped in
+// a "procedures" object property, rather than a bare top-level array,
+// because MCP requires structuredContent (and its outputSchema) to be a
+// JSON object at the top level — a raw array fails Claude Desktop's
+// tools/list validation outright.
 var listGdsProceduresOutputSchema = &jsonschema.Schema{
-	Type: "array",
-	Items: &jsonschema.Schema{
-		Type: "object",
-		Properties: map[string]*jsonschema.Schema{
-			"name":        {Type: "string"},
-			"description": {Type: "string"},
-			"signature":   {Type: "string"},
-			"type":        {Type: "string"},
+	Type: "object",
+	Properties: map[string]*jsonschema.Schema{
+		"procedures": {
+			Type: "array",
+			Items: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					"name":        {Type: "string"},
+					"description": {Type: "string"},
+					"signature":   {Type: "string"},
+					"type":        {Type: "string"},
+				},
+			},
 		},
 	},
+	Required: []string{"procedures"},
 }
 
 func ListGDSProceduresSpec() mcpsdk.Tool {

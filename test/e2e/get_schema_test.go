@@ -7,12 +7,27 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk/mcpsdktest"
 	"github.com/neo4j-labs/neo4j-mcp-canary/test/e2e/helpers"
 )
+
+// getSchemaEntriesJSON extracts the "schema" array from get-schema's
+// {"schema": [...]} structured output, as a raw JSON string, for use with
+// helpers.AssertJSONListContainsObject (which expects a bare JSON list).
+func getSchemaEntriesJSON(t *testing.T, responseText string) string {
+	t.Helper()
+	var wrapped struct {
+		Schema json.RawMessage `json:"schema"`
+	}
+	if err := json.Unmarshal([]byte(responseText), &wrapped); err != nil {
+		t.Fatalf("failed to parse get-schema response: %v", err)
+	}
+	return string(wrapped.Schema)
+}
 
 func TestGetSchemaE2E(t *testing.T) {
 	t.Parallel()
@@ -103,8 +118,9 @@ func TestGetSchemaE2E(t *testing.T) {
 				},
 			},
 		}
-		tc.AssertJSONListContainsObject(schemaJSON, personExpectation)
-		tc.AssertJSONListContainsObject(schemaJSON, companyExpectation)
+		schemaEntriesJSON := getSchemaEntriesJSON(t, schemaJSON)
+		tc.AssertJSONListContainsObject(schemaEntriesJSON, personExpectation)
+		tc.AssertJSONListContainsObject(schemaEntriesJSON, companyExpectation)
 
 		t.Logf("Successfully retrieved schema JSON: %s", schemaJSON)
 
@@ -213,9 +229,10 @@ func TestGetSchemaE2E(t *testing.T) {
 		}
 
 		// Assert all expected entries exist in the schema
-		tc.AssertJSONListContainsObject(schemaJSON, personExpectation)
-		tc.AssertJSONListContainsObject(schemaJSON, companyExpectation)
-		tc.AssertJSONListContainsObject(schemaJSON, relationshipExpectation)
+		schemaEntriesJSON := getSchemaEntriesJSON(t, schemaJSON)
+		tc.AssertJSONListContainsObject(schemaEntriesJSON, personExpectation)
+		tc.AssertJSONListContainsObject(schemaEntriesJSON, companyExpectation)
+		tc.AssertJSONListContainsObject(schemaEntriesJSON, relationshipExpectation)
 
 		t.Logf("Successfully retrieved schema with nodes and relationships: %s", schemaJSON)
 	})

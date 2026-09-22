@@ -29,7 +29,7 @@ func TestListGdsProceduresHandler(t *testing.T) {
 			Return([]*neo4j.Record{}, nil)
 		mockDB.EXPECT().
 			Neo4jRecordsToJSON(gomock.Any()).
-			Return("", nil)
+			Return("[]", nil)
 
 		deps := &tools.ToolDependencies{
 			DBService: mockDB,
@@ -126,6 +126,7 @@ func TestListGdsProceduresHandler_PopulatesStructuredContent(t *testing.T) {
 		ExecuteReadQuery(gomock.Any(), gomock.Any(), gomock.Nil()).
 		Return([]*neo4j.Record{}, nil)
 	canonicalJSON := `[{"name":"gds.pageRank.stream","description":"PageRank","signature":"sig","type":"procedure"}]`
+	wantWrapped := `{"procedures":` + canonicalJSON + `}`
 	mockDB.EXPECT().Neo4jRecordsToJSON(gomock.Any()).Return(canonicalJSON, nil)
 
 	deps := &tools.ToolDependencies{DBService: mockDB}
@@ -140,15 +141,15 @@ func TestListGdsProceduresHandler_PopulatesStructuredContent(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected TextContent, got %T", result.Content[0])
 	}
-	if text.Text != canonicalJSON {
-		t.Errorf("Content text = %q, want %q (default OutputFormat should pass JSON through unchanged)", text.Text, canonicalJSON)
+	if text.Text != wantWrapped {
+		t.Errorf("Content text = %q, want %q (default OutputFormat should pass JSON through unchanged, wrapped in a \"procedures\" object)", text.Text, wantWrapped)
 	}
 
 	structured, ok := result.StructuredContent.(json.RawMessage)
 	if !ok {
 		t.Fatalf("expected StructuredContent to be json.RawMessage, got %T", result.StructuredContent)
 	}
-	if string(structured) != canonicalJSON {
-		t.Errorf("StructuredContent = %q, want %q", string(structured), canonicalJSON)
+	if string(structured) != wantWrapped {
+		t.Errorf("StructuredContent = %q, want %q", string(structured), wantWrapped)
 	}
 }

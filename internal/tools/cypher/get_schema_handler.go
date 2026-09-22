@@ -68,7 +68,7 @@ func handleGetSchema(ctx context.Context, deps *tools.ToolDependencies, schemaSa
 		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
 
-	jsonData, err := json.Marshal(structuredOutput)
+	jsonData, err := json.Marshal(GetSchemaOutput{Schema: structuredOutput})
 	if err != nil {
 		slog.Error("failed to serialize structured schema", "error", err)
 		return mcpsdk.NewToolResultError(err.Error()), nil
@@ -82,6 +82,13 @@ func handleGetSchema(ctx context.Context, deps *tools.ToolDependencies, schemaSa
 }
 
 // --- Output types ---
+
+// GetSchemaOutput is the top-level structured-output shape for get-schema:
+// an object wrapping the schema-item list, since MCP requires structuredContent
+// to be a JSON object rather than a bare array — see getSchemaOutputSchema.
+type GetSchemaOutput struct {
+	Schema []SchemaItem `json:"schema"`
+}
 
 // SchemaItem is one entry in the schema list — either a node label or a
 // relationship type, distinguished by Value.Type ("node" vs "relationship").

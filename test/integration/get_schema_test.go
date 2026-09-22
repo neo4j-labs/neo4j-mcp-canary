@@ -13,6 +13,10 @@ import (
 	"github.com/neo4j-labs/neo4j-mcp-canary/test/integration/helpers"
 )
 
+type GetSchemaResponse struct {
+	Schema []SchemaItem `json:"schema"`
+}
+
 type SchemaItem struct {
 	Key   string       `json:"key"`
 	Value SchemaDetail `json:"value"`
@@ -47,8 +51,9 @@ func TestGetSchema(t *testing.T) {
 	getSchema := cypher.GetSchemaHandler(tc.Deps, 100)
 	res := tc.CallTool(getSchema, nil)
 
-	var schemaEntries []SchemaItem
-	tc.ParseJSONResponse(res, &schemaEntries)
+	var response GetSchemaResponse
+	tc.ParseJSONResponse(res, &response)
+	schemaEntries := response.Schema
 
 	if len(schemaEntries) == 0 {
 		t.Fatal("expected schema to contain at least one entry")

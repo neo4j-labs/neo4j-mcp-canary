@@ -9,6 +9,8 @@ package server
 import (
 	"testing"
 
+	"github.com/google/jsonschema-go/jsonschema"
+
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
@@ -51,6 +53,34 @@ func TestGetAllToolsDefs_EveryToolHasCategoryAndLabel(t *testing.T) {
 		}
 		if d.Label() == "" {
 			t.Errorf("tool %q has no Label", name)
+		}
+	}
+}
+
+// TestGetAllToolsDefs_OutputSchemaIsTopLevelObject enforces MCP's requirement
+// that structuredContent (and the outputSchema describing it) be a JSON
+// object at the top level — a top-level "array" or a bare "$ref" (present
+// but with no explicit "type") fails Claude Desktop's tools/list validation
+// outright and prevents every tool from registering, not just the
+// offending one. See get-schema/list-gds-procedures (used to declare a
+// top-level array) and explain-cypher (used to declare a top-level bare
+// $ref) for the bug this guards against.
+func TestGetAllToolsDefs_OutputSchemaIsTopLevelObject(t *testing.T) {
+	s := &Neo4jMCPServer{config: &config.Config{}}
+	deps := s.buildToolDependencies()
+
+	for _, d := range s.getAllToolsDefs(deps) {
+		raw := d.definition.Tool.OutputSchema
+		if raw == nil {
+			continue
+		}
+		schema, ok := raw.(*jsonschema.Schema)
+		if !ok {
+			t.Errorf("tool %q has an OutputSchema of unexpected type %T", d.definition.Tool.Name, raw)
+			continue
+		}
+		if schema.Type != "object" {
+			t.Errorf("tool %q OutputSchema.Type = %q, want \"object\"", d.definition.Tool.Name, schema.Type)
 		}
 	}
 }

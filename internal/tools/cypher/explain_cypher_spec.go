@@ -10,13 +10,24 @@ import (
 )
 
 // planNodeSchema is the recursive JSON Schema for PlanNode (see
-// explain_cypher_handler.go), declared via $ref/$defs rather than
+// explain_cypher_handler.go), declared via $defs rather than
 // mcpsdk.MustOutputSchemaFor[PlanNode]() — PlanNode.Children is
 // self-referential ([]PlanNode), which the reflection-based schema builder
-// rejects outright ("cycle detected"). Shared with profile-cypher's output
-// schema, which embeds this same shape for its Profile field.
+// rejects outright ("cycle detected"). The top level repeats PlanNode's own
+// properties (rather than a bare top-level $ref) so the schema carries an
+// explicit top-level "type": "object" — MCP clients (e.g. Claude Desktop)
+// validate that literally, without resolving $ref, and reject the whole
+// tools/list response otherwise. Shared with profile-cypher's output schema,
+// which embeds this same shape (via $ref, which is fine at a nested field)
+// for its Profile field.
 var planNodeSchema = &jsonschema.Schema{
-	Ref: "#/$defs/PlanNode",
+	Type: "object",
+	Properties: map[string]*jsonschema.Schema{
+		"operator":    {Type: "string"},
+		"arguments":   {Type: "object"},
+		"identifiers": {Type: "array", Items: &jsonschema.Schema{Type: "string"}},
+		"children":    {Type: "array", Items: &jsonschema.Schema{Ref: "#/$defs/PlanNode"}},
+	},
 	Defs: map[string]*jsonschema.Schema{
 		"PlanNode": {
 			Type: "object",

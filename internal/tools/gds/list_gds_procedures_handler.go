@@ -45,11 +45,24 @@ func handleListGdsProcedures(ctx context.Context, deps *tools.ToolDependencies) 
 		slog.Error("failed to format list-gds-procedures results to JSON", "error", err)
 		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
-	response, err := tools.EncodeOutput(canonicalJSON, deps.OutputFormat)
+	wrappedJSON, err := json.Marshal(ListGdsProceduresOutput{Procedures: json.RawMessage(canonicalJSON)})
+	if err != nil {
+		slog.Error("failed to wrap list-gds-procedures results", "error", err)
+		return mcpsdk.NewToolResultError(err.Error()), nil
+	}
+	response, err := tools.EncodeOutput(string(wrappedJSON), deps.OutputFormat)
 	if err != nil {
 		slog.Error("failed to encode list-gds-procedures results", "error", err)
 		return mcpsdk.NewToolResultError(err.Error()), nil
 	}
 
-	return mcpsdk.NewToolResultTextAndStructured(response, json.RawMessage(canonicalJSON)), nil
+	return mcpsdk.NewToolResultTextAndStructured(response, json.RawMessage(wrappedJSON)), nil
+}
+
+// ListGdsProceduresOutput is the top-level structured-output shape for
+// list-gds-procedures: an object wrapping the procedure list, since MCP
+// requires structuredContent to be a JSON object rather than a bare array —
+// see listGdsProceduresOutputSchema.
+type ListGdsProceduresOutput struct {
+	Procedures json.RawMessage `json:"procedures"`
 }
