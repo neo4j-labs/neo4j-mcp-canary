@@ -1,0 +1,15 @@
+kind: Added
+body: >-
+  Added a live, read/write admin dashboard at /admin (HTTP mode only),
+  gated by a new NEO4J_MCP_ADMIN_TOKEN credential separate from the
+  per-request Neo4j credentials used at /mcp — the surface fails closed
+  (404, not 401) when the token is unset. From the dashboard, an operator
+  can view registered tools, edit tool selection/output-format/Cypher
+  safeguards/CORS/HTTP/TLS/connection settings, preview the resulting diff
+  and which of three cost tiers it falls into (instant, a brief HTTP
+  listener restart, or a Neo4j connection rebuild), and Apply the change to
+  the running server with no process restart. Changes are in-memory only;
+  a restart reverts to the env/CLI/config-file values. A built-in tool-call
+  playground lets an operator confirm a change (e.g. write-cypher
+  disappearing after enabling read-only mode) through the exact same
+  handler a real client hits, without leaving the browser.

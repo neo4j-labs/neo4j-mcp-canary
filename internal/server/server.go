@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/admin"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/auth"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
@@ -34,6 +35,7 @@ const (
 	protocolHTTP                = "http"
 	protocolHTTPS               = "https"
 	serverHTTPShutdownTimeout   = 65 * time.Second  // Timeout for graceful shutdown (must exceed WriteTimeout to allow active requests to complete)
+	stopWaitTimeout             = 5 * time.Second   // Safety-net bound on Stop() waiting for the StartHTTPServer goroutine to confirm exit, independent of ctx's own deadline
 	serverHTTPReadHeaderTimeout = 5 * time.Second   // SECURITY: Maximum time to read request headers (prevents Slowloris attacks)
 	serverHTTPReadTimeout       = 15 * time.Second  // SECURITY: Maximum time to read entire request including body (prevents slow-read attacks)
 	serverHTTPWriteTimeout      = 60 * time.Second  // FUNCTIONALITY: Maximum time to write response (allows complex Neo4j queries and large result sets)
@@ -55,13 +57,15 @@ type Neo4jMCPServer struct {
 	httpServer         *http.Server
 	HTTPServerReady    chan struct{}
 	shutdownChan       chan struct{}
-	config             *config.Config
-	dbService          database.Service
+	config             *liveConfig
+	dbService          *liveDBService
 	version            string
 	anService          analytics.Service
 	gdsInstalled       bool
 	initMu             sync.Mutex
 	connectionVerified atomic.Bool
+	applyMu            sync.Mutex    // serializes Apply calls; see apply.go
+	httpServerDone     chan struct{} // closed when StartHTTPServer's goroutine has fully returned; see Stop
 }
 
 // NewNeo4jMCPServer creates a new MCP server instance
@@ -71,8 +75,8 @@ func NewNeo4jMCPServer(version string, cfg *config.Config, dbService database.Se
 	neo4jServer := &Neo4jMCPServer{
 		HTTPServerReady: make(chan struct{}),
 		shutdownChan:    make(chan struct{}),
-		config:          cfg,
-		dbService:       dbService,
+		config:          newLiveConfig(cfg),
+		dbService:       newLiveDBService(dbService),
 		version:         version,
 		anService:       anService,
 		gdsInstalled:    false,
@@ -99,7 +103,7 @@ func (s *Neo4jMCPServer) ListTools() []mcpsdk.Tool {
 // Start initializes and starts the MCP server
 func (s *Neo4jMCPServer) Start() error {
 
-	switch s.config.TransportMode {
+	switch s.config.Get().TransportMode {
 	case config.TransportModeHTTP:
 		slog.Info("Registering server tools")
 		if err := s.registerTools(); err != nil {
@@ -129,7 +133,7 @@ func (s *Neo4jMCPServer) Start() error {
 			return s.mcpServer.ServeStdio(context.Background())
 		}
 	default:
-		return fmt.Errorf("unsupported transport mode: %s", s.config.TransportMode)
+		return fmt.Errorf("unsupported transport mode: %s", s.config.Get().TransportMode)
 	}
 }
 
@@ -174,13 +178,13 @@ func parseCommaList(s string) []string {
 // - The ability to perform a read query (database name is correctly defined).
 // - In case GDS is not installed a flag is set in the server and tools will be registered accordingly
 func (s *Neo4jMCPServer) verifyRequirements(ctx context.Context) error {
-	err := s.dbService.VerifyConnectivity(ctx)
+	err := s.dbService.Get().VerifyConnectivity(ctx)
 	if err != nil {
 		return err
 	}
 
 	// Call gds.version procedure to determine if GDS is installed
-	records, err := s.dbService.ExecuteReadQuery(ctx, "RETURN gds.version() as gdsVersion", nil)
+	records, err := s.dbService.Get().ExecuteReadQuery(ctx, "RETURN gds.version() as gdsVersion", nil)
 	if err != nil {
 		// GDS is optional, so we log a warning and continue, assuming it's not installed.
 		log.Print("Impossible to verify GDS installation.")
@@ -202,8 +206,8 @@ func (s *Neo4jMCPServer) emitServerStartupEvent() {
 	// A malformed URI would already have failed at connection-setup time in
 	// main.go before the server ever got this far, so the error here is
 	// ignored — ModeBolt is DetectMode's safe zero-value fallback.
-	connMode, _ := queryapi.DetectMode(s.config.URI)
-	s.anService.EmitEvent(s.anService.NewStartupEvent(s.config.TransportMode, s.config.HTTPTLSEnabled, s.version, connMode.String()))
+	connMode, _ := queryapi.DetectMode(s.config.Get().URI)
+	s.anService.EmitEvent(s.anService.NewStartupEvent(s.config.Get().TransportMode, s.config.Get().HTTPTLSEnabled, s.version, connMode.String()))
 }
 
 // emitConnectionInitializedEvent emits the connection initialized event with DB information (STDIO mode only)
@@ -212,7 +216,7 @@ func (s *Neo4jMCPServer) emitConnectionInitializedEvent(ctx context.Context) {
 		return
 	}
 
-	records, err := s.dbService.ExecuteReadQuery(ctx, "CALL dbms.components()", map[string]any{})
+	records, err := s.dbService.Get().ExecuteReadQuery(ctx, "CALL dbms.components()", map[string]any{})
 	if err != nil {
 		slog.Debug("Failed to collect connection metadata", "error", err.Error())
 		return
@@ -292,7 +296,7 @@ func recordsToConnectionEventInfo(records []*neo4j.Record) analytics.ConnectionE
 // - Compatible with self-signed and enterprise certificates
 func (s *Neo4jMCPServer) buildTLSConfig() (*tls.Config, error) {
 	// Load the certificate and key
-	cert, err := tls.LoadX509KeyPair(s.config.HTTPTLSCertFile, s.config.HTTPTLSKeyFile)
+	cert, err := tls.LoadX509KeyPair(s.config.Get().HTTPTLSCertFile, s.config.Get().HTTPTLSKeyFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load TLS certificate and key: %w", err)
 	}
@@ -309,7 +313,11 @@ func (s *Neo4jMCPServer) buildTLSConfig() (*tls.Config, error) {
 	return tlsConfig, nil
 }
 
-// Stop gracefully stops the HTTP server
+// Stop gracefully stops the HTTP server. It does not return until the
+// goroutine running StartHTTPServer has fully exited — not merely until
+// Shutdown() has completed — so that by the time Stop returns, it's safe
+// for a caller to reuse/reassign shutdownChan or HTTPServerReady for a new
+// StartHTTPServer call (see Apply's HTTP-bounce path).
 func (s *Neo4jMCPServer) Stop(ctx context.Context) error {
 	if s.httpServer != nil {
 		slog.Info("Stopping HTTP server...")
@@ -317,30 +325,73 @@ func (s *Neo4jMCPServer) Stop(ctx context.Context) error {
 			slog.Error("Error shutting down HTTP server", "error", err)
 			return err
 		}
-		// Signal the StartHTTPServer goroutine to exit
+		// Signal the StartHTTPServer goroutine to exit, then wait for it to
+		// actually do so.
 		close(s.shutdownChan)
+		select {
+		case <-s.httpServerDone:
+		case <-ctx.Done():
+			slog.Warn("Stop(): context done before HTTP server goroutine confirmed exit")
+		case <-time.After(stopWaitTimeout):
+			slog.Warn("Stop(): timed out waiting for HTTP server goroutine to confirm exit")
+		}
 		slog.Info("HTTP server stopped")
 	}
 	return nil
 }
 
+// buildHandler constructs the full HTTP handler (the MCP endpoint at /mcp,
+// plus the admin dashboard at /admin when configured) from the current live
+// config. Split out from StartHTTPServer so Apply's Tier 1 path can rebuild
+// and hot-swap just s.httpServer.Handler — which net/http reads fresh on
+// every request — without touching the bound listener at all.
+func (s *Neo4jMCPServer) buildHandler() http.Handler {
+	mcpServerHTTP := s.mcpServer.HTTPHandler(mcpsdk.HTTPOptions{Stateless: true})
+	allowedOrigins := parseAllowedOrigins(s.config.Get().HTTPAllowedOrigins)
+	mcpChain := s.chainMiddleware(allowedOrigins, mcpServerHTTP)
+
+	mux := http.NewServeMux()
+	// Path routing to /mcp is also enforced by pathValidationMiddleware
+	// inside mcpChain as defense in depth; the mux match is authoritative.
+	mux.Handle("/mcp", mcpChain)
+	mux.Handle("/mcp/", mcpChain)
+
+	// The admin dashboard only exists at all when an AdminToken is
+	// configured — fail closed by not registering the route (a 404 that
+	// doesn't reveal the surface exists), rather than registering it
+	// unauthenticated or with a default credential.
+	if token := s.config.Get().AdminToken; token != "" {
+		mux.HandleFunc("/admin/login", handleAdminLogin(token, s.config.Get().HTTPTLSEnabled))
+		adminHandler := admin.New(newAdminBackend(s))
+		adminChain := loggingMiddleware()(corsMiddleware(allowedOrigins, "")(adminAuthMiddleware(token)(adminHandler)))
+		mux.Handle("/admin/", adminChain)
+	}
+
+	return mux
+}
+
 func (s *Neo4jMCPServer) StartHTTPServer() error {
-	addr := fmt.Sprintf("%s:%s", s.config.HTTPHost, s.config.HTTPPort)
+	// httpServerDone lets Stop() wait for this specific invocation to fully
+	// return (not just for Shutdown()/shutdownChan to signal it to start
+	// returning) before a caller — in particular Apply's HTTP-bounce path —
+	// reuses/reassigns shutdownChan or HTTPServerReady for a fresh round.
+	// Without this, there is a real race window between "Shutdown()
+	// returned and shutdownChan was closed" and "this goroutine actually
+	// finished executing and stopped touching those fields".
+	s.httpServerDone = make(chan struct{})
+	defer close(s.httpServerDone)
+
+	addr := fmt.Sprintf("%s:%s", s.config.Get().HTTPHost, s.config.Get().HTTPPort)
 	protocol := protocolHTTP
-	if s.config.HTTPTLSEnabled {
+	if s.config.Get().HTTPTLSEnabled {
 		protocol = protocolHTTPS
 	}
-	slog.Info("Starting HTTP server", "address", addr, "url", fmt.Sprintf("%s://%s", protocol, addr), "tls", s.config.HTTPTLSEnabled)
+	slog.Info("Starting HTTP server", "address", addr, "url", fmt.Sprintf("%s://%s", protocol, addr), "tls", s.config.Get().HTTPTLSEnabled)
 
-	// Create the streamable-HTTP handler. Path routing (mounting it at /mcp)
-	// is handled by pathValidationMiddleware in the middleware chain below.
-	mcpServerHTTP := s.mcpServer.HTTPHandler(mcpsdk.HTTPOptions{Stateless: true})
-
-	allowedOrigins := parseAllowedOrigins(s.config.HTTPAllowedOrigins)
 	// Wrap handler with middleware and create HTTP server
 	s.httpServer = &http.Server{
 		Addr:    addr,
-		Handler: s.chainMiddleware(allowedOrigins, mcpServerHTTP),
+		Handler: s.buildHandler(),
 		// Timeouts optimized for stateless HTTP MCP requests
 		ReadTimeout:       serverHTTPReadTimeout,
 		WriteTimeout:      serverHTTPWriteTimeout,
@@ -349,7 +400,7 @@ func (s *Neo4jMCPServer) StartHTTPServer() error {
 	}
 
 	// Configure TLS if enabled
-	if s.config.HTTPTLSEnabled {
+	if s.config.Get().HTTPTLSEnabled {
 		tlsConfig, err := s.buildTLSConfig()
 		if err != nil {
 			return fmt.Errorf("failed to configure TLS: %w", err)
@@ -366,7 +417,7 @@ func (s *Neo4jMCPServer) StartHTTPServer() error {
 	go func() {
 		var err error
 
-		if s.config.HTTPTLSEnabled {
+		if s.config.Get().HTTPTLSEnabled {
 			// Use empty strings for cert/key files since they're already loaded in TLSConfig
 			err = s.httpServer.ListenAndServeTLS("", "")
 		} else {
@@ -406,7 +457,7 @@ func (s *Neo4jMCPServer) StartHTTPServer() error {
 // configureHooks sets up MCP SDK hooks for tool call tracking
 func (s *Neo4jMCPServer) configureHooks() {
 	s.mcpServer.OnAfterCallTool(s.handleToolCallComplete)
-	if s.config.TransportMode == config.TransportModeHTTP {
+	if s.config.Get().TransportMode == config.TransportModeHTTP {
 		// The MCP client negotiates either the classic "initialize" handshake or,
 		// when both client and server support it, the newer stateless "discover"
 		// handshake (protocol version 2026-07-28+) — the client picks whichever
@@ -505,7 +556,7 @@ func (s *Neo4jMCPServer) handleToolCallComplete(_ context.Context, request *mcps
 	}
 
 	// Emit tool event (connection info sent separately in CONNECTION_INITIALIZED event)
-	s.anService.EmitEvent(s.anService.NewToolEvent(toolName, success, vectorInfo, s.config.OutputFormat))
+	s.anService.EmitEvent(s.anService.NewToolEvent(toolName, success, vectorInfo, s.config.Get().OutputFormat))
 
 	// Handle GDS events for cypher tools
 	if toolName == "read-cypher" || toolName == "write-cypher" {

@@ -120,6 +120,7 @@ type Config struct {
 	AllowUnauthenticatedToolsList               bool          // If true, allows unauthenticated tools list in HTTP mode
 	AllowUnauthenticatedInitialize              bool          // If true, allows unauthenticated initialize in HTTP mode
 	AllowUnauthenticatedNotificationsInitialize bool          // If true, allows unauthenticated initialize notifications in HTTP mode
+	AdminToken                                  string        // Credential gating the /admin dashboard; empty (default) disables the admin surface entirely
 }
 
 // Validate validates the configuration and returns an error if invalid

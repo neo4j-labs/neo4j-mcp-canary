@@ -61,7 +61,7 @@ func NewTestContext(t *testing.T, driver *neo4j.Driver) *TestContext {
 // NewQueryAPITestContext creates a new test context backed by the Query API
 // (Neo4j's HTTP-based query protocol) instead of Bolt, for integration
 // coverage of internal/queryapi.Service against a real server. Mirrors
-// cmd/neo4j-mcp/main.go's newService STDIO-mode construction: one long-lived
+// internal/server/dbfactory.go's buildQueryAPIService STDIO-mode construction: one long-lived
 // *query.QueryAPIClient with fixed Basic Auth credentials.
 func NewQueryAPITestContext(t *testing.T, baseURL, username, password, database string) *TestContext {
 	t.Helper()

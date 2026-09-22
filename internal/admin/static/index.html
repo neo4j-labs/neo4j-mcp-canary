@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>neo4j-mcp-canary admin</title>
+<link rel="stylesheet" href="/admin/static/style.css">
+</head>
+<body>
+<header>
+  <h1>neo4j-mcp-canary <span class="tag">admin</span></h1>
+  <p class="subtitle">Live server configuration &mdash; changes take effect immediately on Apply, no restart. This is a canary/experimental feature; see the tier badge on each field for what "immediately" actually costs.</p>
+</header>
+
+<main>
+  <section id="tools-section">
+    <h2>Registered tools</h2>
+    <table id="tools-table">
+      <thead><tr><th>Name</th><th>Label</th><th>Category</th><th>Read-only</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section id="config-section">
+    <h2>Configuration</h2>
+    <form id="config-form">
+      <fieldset>
+        <legend>Tool selection &amp; safeguards <span class="tier-badge tier-instant">instant</span></legend>
+        <label><input type="checkbox" name="readOnly"> Read-only mode (disables write-cypher)</label>
+        <label>Enabled tools (comma-separated, empty = all)
+          <input type="text" name="enabledTools" placeholder="read-cypher,get-schema">
+        </label>
+        <label>Enabled tool categories (comma-separated, empty = all)
+          <input type="text" name="enabledToolCategories" placeholder="cypher,gds">
+        </label>
+        <label>Output format
+          <select name="outputFormat">
+            <option value="json">json</option>
+            <option value="toon">toon</option>
+            <option value="markdown">markdown</option>
+          </select>
+        </label>
+        <label>Cypher max rows <input type="number" name="cypherMaxRows"></label>
+        <label>Cypher max bytes <input type="number" name="cypherMaxBytes"></label>
+        <label>Cypher timeout (seconds) <input type="number" name="cypherTimeoutSeconds"></label>
+        <label>Cypher max estimated rows <input type="number" name="cypherMaxEstimatedRows"></label>
+        <label>Schema sample size <input type="number" name="schemaSampleSize"></label>
+        <label>Allowed CORS origins <input type="text" name="httpAllowedOrigins" placeholder="*, or comma-separated origins"></label>
+      </fieldset>
+
+      <fieldset>
+        <legend>HTTP &amp; TLS <span class="tier-badge tier-bounce">brief interruption</span></legend>
+        <label>Host <input type="text" name="httpHost"></label>
+        <label>Port <input type="text" name="httpPort"></label>
+        <label><input type="checkbox" name="httpTlsEnabled"> TLS enabled</label>
+        <label>TLS cert file <input type="text" name="httpTlsCertFile"></label>
+        <label>TLS key file <input type="text" name="httpTlsKeyFile"></label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Connection <span class="tier-badge tier-rebuild">driver rebuild</span></legend>
+        <label>Neo4j URI <input type="text" name="uri"></label>
+        <label>Database <input type="text" name="database"></label>
+      </fieldset>
+
+      <div class="actions">
+        <button type="button" id="preview-btn">Preview changes</button>
+        <button type="button" id="apply-btn" disabled>Apply</button>
+      </div>
+    </form>
+
+    <div id="preview-panel" class="hidden">
+      <h3>Pending changes</h3>
+      <table id="diff-table"><thead><tr><th>Field</th><th>Current</th><th>New</th></tr></thead><tbody></tbody></table>
+      <p id="tier-summary"></p>
+    </div>
+
+    <div id="apply-result" class="hidden"></div>
+  </section>
+
+  <section id="playground-section">
+    <h2>Tool-call playground</h2>
+    <p class="hint">Calls go through the exact same handler real MCP clients use, including auth. Supply whatever Neo4j credential the tool needs below (not your admin token).</p>
+    <label>Tool
+      <select id="pg-tool"></select>
+    </label>
+    <label>Authorization header value (e.g. <code>Basic ...</code> or <code>Bearer ...</code>)
+      <input type="text" id="pg-authz" placeholder="Basic bmVvNGo6cGFzc3dvcmQ=">
+    </label>
+    <label>Arguments (JSON)
+      <textarea id="pg-args" rows="4">{}</textarea>
+    </label>
+    <button type="button" id="pg-call-btn">Call tool</button>
+    <pre id="pg-result"></pre>
+  </section>
+</main>
+
+<script src="/admin/static/app.js"></script>
+</body>
+</html>

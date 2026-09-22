@@ -25,7 +25,7 @@ func serverToolNamed(name string) mcpsdk.ServerTool {
 // than a convention, since getAllToolsDefs is a hand-maintained literal
 // slice.
 func TestGetAllToolsDefs_EveryToolHasCategoryAndLabel(t *testing.T) {
-	s := &Neo4jMCPServer{config: &config.Config{}}
+	s := &Neo4jMCPServer{config: newLiveConfig(&config.Config{}), dbService: newLiveDBService(nil)}
 	deps := s.buildToolDependencies()
 
 	for _, d := range s.getAllToolsDefs(deps) {

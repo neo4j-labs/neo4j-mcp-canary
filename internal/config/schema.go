@@ -267,4 +267,12 @@ var fields = []Field{
 			cfg.AllowUnauthenticatedNotificationsInitialize = ParseBool(raw, true)
 		},
 	},
+	{
+		// No default: an empty AdminToken disables the /admin dashboard
+		// entirely (fail closed) rather than falling back to some default
+		// credential.
+		Name: "AdminToken", EnvVar: "NEO4J_MCP_ADMIN_TOKEN", FlagName: "neo4j-mcp-admin-token",
+		Placeholder: "TOKEN", Description: "Credential gating the /admin dashboard; unset disables it entirely",
+		Setter: func(cfg *Config, raw string) { cfg.AdminToken = raw },
+	},
 }

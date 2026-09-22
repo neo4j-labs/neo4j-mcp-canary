@@ -66,11 +66,11 @@ func TestHTTPServerPortConfiguration(t *testing.T) {
 
 			// Verify the HTTP server config is stored correctly in the server's config
 			// This tests the configuration layer without running the server
-			if srv.config.HTTPHost != tt.httpHost {
-				t.Errorf("HTTPHost: expected %q, got %q", tt.httpHost, srv.config.HTTPHost)
+			if srv.config.Get().HTTPHost != tt.httpHost {
+				t.Errorf("HTTPHost: expected %q, got %q", tt.httpHost, srv.config.Get().HTTPHost)
 			}
-			if srv.config.HTTPPort != tt.httpPort {
-				t.Errorf("HTTPPort: expected %q, got %q", tt.httpPort, srv.config.HTTPPort)
+			if srv.config.Get().HTTPPort != tt.httpPort {
+				t.Errorf("HTTPPort: expected %q, got %q", tt.httpPort, srv.config.Get().HTTPPort)
 			}
 		})
 	}
@@ -137,14 +137,14 @@ func TestHTTPServerTLSConfiguration(t *testing.T) {
 
 			// Verify TLS config is stored correctly in the server's config
 			// This tests the configuration layer without running the server
-			if srv.config.HTTPTLSEnabled != tt.tlsEnabled {
-				t.Errorf("HTTPTLSEnabled: expected %v, got %v", tt.tlsEnabled, srv.config.HTTPTLSEnabled)
+			if srv.config.Get().HTTPTLSEnabled != tt.tlsEnabled {
+				t.Errorf("HTTPTLSEnabled: expected %v, got %v", tt.tlsEnabled, srv.config.Get().HTTPTLSEnabled)
 			}
-			if srv.config.HTTPTLSCertFile != tt.tlsCertFile {
-				t.Errorf("HTTPTLSCertFile: expected %q, got %q", tt.tlsCertFile, srv.config.HTTPTLSCertFile)
+			if srv.config.Get().HTTPTLSCertFile != tt.tlsCertFile {
+				t.Errorf("HTTPTLSCertFile: expected %q, got %q", tt.tlsCertFile, srv.config.Get().HTTPTLSCertFile)
 			}
-			if srv.config.HTTPTLSKeyFile != tt.tlsKeyFile {
-				t.Errorf("HTTPTLSKeyFile: expected %q, got %q", tt.tlsKeyFile, srv.config.HTTPTLSKeyFile)
+			if srv.config.Get().HTTPTLSKeyFile != tt.tlsKeyFile {
+				t.Errorf("HTTPTLSKeyFile: expected %q, got %q", tt.tlsKeyFile, srv.config.Get().HTTPTLSKeyFile)
 			}
 		})
 	}
@@ -230,7 +230,7 @@ func TestBuildTLSConfig(t *testing.T) {
 				HTTPTLSKeyFile:  keyPath,
 			}
 
-			srv := &Neo4jMCPServer{config: cfg}
+			srv := &Neo4jMCPServer{config: newLiveConfig(cfg)}
 
 			tlsConfig, err := srv.buildTLSConfig()
 

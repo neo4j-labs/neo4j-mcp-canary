@@ -164,6 +164,7 @@ When using HTTP transport, enable TLS for secure communication via the variables
 | `NEO4J_HTTP_AUTH_HEADER_NAME`   | `--neo4j-http-auth-header-name`| `Authorization`                          | Header name to read credentials from      |
 | `NEO4J_MCP_HTTP_TOOLS_HEADER_NAME` | `--neo4j-mcp-http-tools-header-name` | `X-MCP-Tools`                  | Header a client uses to select tools by name for one request |
 | `NEO4J_MCP_HTTP_TOOL_CATEGORIES_HEADER_NAME` | `--neo4j-mcp-http-tool-categories-header-name` | `X-MCP-Tool-Categories` | Header a client uses to select tools by category for one request |
+| `NEO4J_MCP_ADMIN_TOKEN`         | `--neo4j-mcp-admin-token`      | — (disabled)                             | Credential gating the `/admin` dashboard  |
 
 **Security Configuration**
 
@@ -301,6 +302,7 @@ Available flags:
 - `--neo4j-http-allow-unauthenticated-tools-list` — overrides `NEO4J_HTTP_ALLOW_UNAUTHENTICATED_TOOLS_LIST`
 - `--neo4j-http-allow-unauthenticated-initialize` — overrides `NEO4J_HTTP_ALLOW_UNAUTHENTICATED_INITIALIZE`
 - `--neo4j-http-allow-unauthenticated-notifications-initialize` — overrides `NEO4J_HTTP_ALLOW_UNAUTHENTICATED_NOTIFICATIONS_INITIALIZE`
+- `--neo4j-mcp-admin-token` — overrides `NEO4J_MCP_ADMIN_TOKEN` (enables the `/admin` dashboard when set)
 
 Run `neo4j-mcp-canary --help` to see the complete list with descriptions.
 
@@ -443,6 +445,20 @@ curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'
 ```
+
+## Admin Dashboard (HTTP mode only)
+
+Setting `NEO4J_MCP_ADMIN_TOKEN` (or `--neo4j-mcp-admin-token`) enables a browser dashboard at `/admin`, gated by that token and completely separate from the per-request Neo4j credentials used at `/mcp` — it never appears at all (a 404, not a 401) when the token is unset. Log in at `/admin/login` with the token to get a session cookie.
+
+From the dashboard you can view the currently registered tools, edit a subset of server config, and **Apply** changes to the *running* server — no restart. Different fields cost different things to apply, and the dashboard's Preview step always shows which before you commit:
+
+- **Instant, no interruption** — tool selection (`ReadOnly`, `NEO4J_MCP_ENABLED_TOOLS`/`CATEGORIES`), output format, the Cypher safeguards, schema sample size, and allowed CORS origins.
+- **Brief HTTP interruption** — host, port, and TLS settings restart the HTTP listener (a few seconds, affecting every connected client).
+- **Connection rebuild** — changing the Neo4j URI or database rebuilds the underlying driver/connection; in-flight requests against the old connection aren't drained.
+
+Changes made this way are _in-memory only_ — a process restart reverts to whatever `NEO4J_URI`/env vars/config file specify. The dashboard also has a built-in tool-call playground (similar in spirit to `@modelcontextprotocol/inspector`) that calls a tool through the exact same handler a real client would hit, so you can confirm a change (e.g. `write-cypher` disappearing after enabling read-only mode) without leaving the browser — you supply whatever Neo4j credential the tool itself needs there, separate from the admin token.
+
+This is an experimental, canary-only feature: the login mechanism is intentionally minimal (a single shared token, no per-user accounts or audit log), and it's the biggest attack-surface addition in this server — only enable it where that trade-off makes sense.
 
 ## Client Configuration
 

@@ -73,6 +73,21 @@ func (s *Server) AddTools(defs ...ServerTool) {
 	}
 }
 
+// RemoveTools unregisters the tools with the given names. It is not an error
+// to remove a name that isn't currently registered. Needed alongside
+// AddTool/AddTools (which only ever add or replace) whenever a caller needs
+// to shrink the registered tool set — e.g. re-applying a narrower tool
+// selection at runtime.
+func (s *Server) RemoveTools(names ...string) {
+	s.mu.Lock()
+	for _, name := range names {
+		delete(s.tools, name)
+	}
+	s.mu.Unlock()
+
+	s.inner.RemoveTools(names...)
+}
+
 // ListTools returns every tool currently registered on this server. Backed by
 // our own bookkeeping (rather than a live protocol round-trip) so it can be
 // used synchronously, e.g. by tests asserting on conditional tool registration.

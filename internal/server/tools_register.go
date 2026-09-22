@@ -55,6 +55,32 @@ func (s *Neo4jMCPServer) addGDSTools() {
 	s.mcpServer.AddTools(filteredTools...)
 }
 
+// reRegisterTools recomputes the enabled tool set from the current live
+// config and reconciles it against what's actually registered on the MCP
+// server: tools no longer enabled are removed, everything else is
+// (re-)added with freshly built ToolDependencies. Unlike registerTools
+// (called once at startup) or addGDSTools (called once, on first successful
+// HTTP request), this is safe to call repeatedly against an
+// already-running server — see Neo4jMCPServer.Apply.
+func (s *Neo4jMCPServer) reRegisterTools() {
+	desired := s.getEnabledTools()
+	desiredNames := make(map[string]bool, len(desired))
+	for _, d := range desired {
+		desiredNames[d.Tool.Name] = true
+	}
+
+	var toRemove []string
+	for _, t := range s.mcpServer.ListTools() {
+		if !desiredNames[t.Name] {
+			toRemove = append(toRemove, t.Name)
+		}
+	}
+	if len(toRemove) > 0 {
+		s.mcpServer.RemoveTools(toRemove...)
+	}
+	s.mcpServer.AddTools(desired...)
+}
+
 func (s *Neo4jMCPServer) getEnabledTools() []mcpsdk.ServerTool {
 	filters := make([]toolFilter, 0)
 
@@ -64,7 +90,7 @@ func (s *Neo4jMCPServer) getEnabledTools() []mcpsdk.ServerTool {
 		filters = append(filters, filterBySelection(names, categories))
 	}
 	// If read-only mode is enabled, expose only tools annotated as read-only.
-	if s.config != nil && s.config.ReadOnly {
+	if s.config != nil && s.config.Get().ReadOnly {
 		filters = append(filters, filterWriteTools)
 	}
 	// If GDS is not installed, disable GDS tools.
@@ -94,7 +120,7 @@ func (s *Neo4jMCPServer) enabledToolSelection() (names, categories []string) {
 	if s.config == nil {
 		return nil, nil
 	}
-	return parseCommaList(s.config.EnabledTools), parseCommaList(s.config.EnabledToolCategories)
+	return parseCommaList(s.config.Get().EnabledTools), parseCommaList(s.config.Get().EnabledToolCategories)
 }
 
 // warnOnUnknownSelection logs a warning for any configured tool name or
@@ -161,14 +187,14 @@ func filterGDSTools(defs []ToolDefinition) []ToolDefinition {
 // buildToolDependencies creates a ToolDependencies with all config wired through.
 func (s *Neo4jMCPServer) buildToolDependencies() *tools.ToolDependencies {
 	return &tools.ToolDependencies{
-		DBService:              s.dbService,
+		DBService:              s.dbService.Get(),
 		AnalyticsService:       s.anService,
-		OutputFormat:           s.config.OutputFormat,
-		SchemaSampleSize:       int(s.config.SchemaSampleSize),
-		CypherMaxRows:          int(s.config.CypherMaxRows),
-		CypherMaxBytes:         int(s.config.CypherMaxBytes),
-		CypherTimeout:          time.Duration(s.config.CypherTimeoutSeconds) * time.Second,
-		CypherMaxEstimatedRows: int(s.config.CypherMaxEstimatedRows),
+		OutputFormat:           s.config.Get().OutputFormat,
+		SchemaSampleSize:       int(s.config.Get().SchemaSampleSize),
+		CypherMaxRows:          int(s.config.Get().CypherMaxRows),
+		CypherMaxBytes:         int(s.config.Get().CypherMaxBytes),
+		CypherTimeout:          time.Duration(s.config.Get().CypherTimeoutSeconds) * time.Second,
+		CypherMaxEstimatedRows: int(s.config.Get().CypherMaxEstimatedRows),
 	}
 }
 
@@ -180,7 +206,7 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 			Category: tools.CategoryCypher,
 			definition: mcpsdk.ServerTool{
 				Tool:    cypher.GetSchemaSpec(),
-				Handler: cypher.GetSchemaHandler(deps, s.config.SchemaSampleSize),
+				Handler: cypher.GetSchemaHandler(deps, s.config.Get().SchemaSampleSize),
 			},
 			readonly: true,
 		},

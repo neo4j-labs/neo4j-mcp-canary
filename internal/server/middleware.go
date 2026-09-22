@@ -40,28 +40,28 @@ func (s *Neo4jMCPServer) chainMiddleware(allowedOrigins []string, next http.Hand
 	handler = loggingMiddleware()(handler)
 
 	var unauthMethods []string
-	if s.config.AllowUnauthenticatedPing {
+	if s.config.Get().AllowUnauthenticatedPing {
 		unauthMethods = append(unauthMethods, "ping")
 	}
-	if s.config.AllowUnauthenticatedToolsList {
+	if s.config.Get().AllowUnauthenticatedToolsList {
 		unauthMethods = append(unauthMethods, "tools/list")
 	}
-	if s.config.AllowUnauthenticatedInitialize {
+	if s.config.Get().AllowUnauthenticatedInitialize {
 		unauthMethods = append(unauthMethods, "initialize")
 	}
-	if s.config.AllowUnauthenticatedNotificationsInitialize {
+	if s.config.Get().AllowUnauthenticatedNotificationsInitialize {
 		unauthMethods = append(unauthMethods, "notifications/initialized")
 	}
 
-	handler = authMiddleware(s.config.AuthHeaderName, unauthMethods, s.anService)(handler)
+	handler = authMiddleware(s.config.Get().AuthHeaderName, unauthMethods, s.anService)(handler)
 
 	// Add per-request tool-selection middleware (reads the tools/categories
 	// headers, if present, into the request context for the server's
 	// ToolAccessFilter to consume).
-	handler = toolSelectionMiddleware(s.config.HTTPToolsHeaderName, s.config.HTTPToolCategoriesHeaderName)(handler)
+	handler = toolSelectionMiddleware(s.config.Get().HTTPToolsHeaderName, s.config.Get().HTTPToolCategoriesHeaderName)(handler)
 
 	// Add CORS middleware (if configured) - includes Mcp-Session-Id in allowed headers
-	handler = corsMiddleware(allowedOrigins, s.config.AuthHeaderName, s.config.HTTPToolsHeaderName, s.config.HTTPToolCategoriesHeaderName)(handler)
+	handler = corsMiddleware(allowedOrigins, s.config.Get().AuthHeaderName, s.config.Get().HTTPToolsHeaderName, s.config.Get().HTTPToolCategoriesHeaderName)(handler)
 
 	// Add path validation middleware last (executes first - reject non-/mcp paths quickly)
 	handler = pathValidationMiddleware()(handler)

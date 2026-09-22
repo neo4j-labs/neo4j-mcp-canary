@@ -48,8 +48,8 @@ func mockNeo4jMCPServer(t *testing.T) *Neo4jMCPServer {
 
 	return &Neo4jMCPServer{
 		mcpServer:    mcpServer,
-		config:       cfg,
-		dbService:    mockDBService,
+		config:       newLiveConfig(cfg),
+		dbService:    newLiveDBService(mockDBService),
 		anService:    mockAnalyticsService,
 		version:      "1.0.0",
 		gdsInstalled: false,
@@ -226,7 +226,7 @@ func TestAuthMiddleware_FallbackToBasicAuth(t *testing.T) {
 func TestAuthMiddleware_WithCustomHeaderName(t *testing.T) {
 	// Create a mock server with custom auth header name
 	mock := mockNeo4jMCPServer(t)
-	mock.config.AuthHeaderName = "X-Test-Auth"
+	mock.config.Get().AuthHeaderName = "X-Test-Auth"
 
 	handler := mock.chainMiddleware([]string{}, bearerTokenCheckHandler(t, true, "custom-token-789"))
 
@@ -244,7 +244,7 @@ func TestAuthMiddleware_WithCustomHeaderName(t *testing.T) {
 func TestAuthMiddleware_CustomHeaderName_OverridesAuthHeader(t *testing.T) {
 	// When both Authorization and custom header are present, custom header should take precedence
 	mock := mockNeo4jMCPServer(t)
-	mock.config.AuthHeaderName = "X-Test-Auth"
+	mock.config.Get().AuthHeaderName = "X-Test-Auth"
 
 	handler := mock.chainMiddleware([]string{}, bearerTokenCheckHandler(t, true, "new-token-123"))
 
@@ -621,7 +621,7 @@ func TestPathValidationMiddleware_TrailingSlashAllowed(t *testing.T) {
 func TestAuthMiddleware_AllowsUnauthenticatedPing(t *testing.T) {
 	// Build middleware chain with no allowed origins and a simple handler
 	mockServer := mockNeo4jMCPServer(t)
-	mockServer.config.AllowUnauthenticatedPing = true
+	mockServer.config.Get().AllowUnauthenticatedPing = true
 
 	mockAnalytics := mockServer.anService.(*analytics_mocks.MockService)
 	mockAnalytics.EXPECT().NewUnauthenticatedJSONRPCEvent("ping").Times(1)
@@ -681,7 +681,7 @@ func TestAuthMiddleware_InvalidBasicAuthHeader(t *testing.T) {
 
 func TestAuthMiddleware_AllowsUnauthenticatedToolsList(t *testing.T) {
 	mockServer := mockNeo4jMCPServer(t)
-	mockServer.config.AllowUnauthenticatedToolsList = true
+	mockServer.config.Get().AllowUnauthenticatedToolsList = true
 	handler := mockServer.chainMiddleware([]string{}, mockHandler())
 
 	mockAnalytics := mockServer.anService.(*analytics_mocks.MockService)
@@ -722,7 +722,7 @@ func TestAuthMiddleware_RejectsTooLargeUnauthenticatedPing(t *testing.T) {
 	// middleware will actually read the body (and hit MaxBytesReader) instead
 	// of short-circuiting on ContentLength.
 	mockServer := mockNeo4jMCPServer(t)
-	mockServer.config.AllowUnauthenticatedPing = true
+	mockServer.config.Get().AllowUnauthenticatedPing = true
 	handler := mockServer.chainMiddleware([]string{}, mockHandler())
 
 	// Build a JSON ping body and pad it to exceed the max allowed size
@@ -746,7 +746,7 @@ func TestAuthMiddleware_RejectsTooLargeUnauthenticatedPing(t *testing.T) {
 func TestAuthMiddleware_AllowsUnauthenticatedInitialize(t *testing.T) {
 	// Build middleware chain with no allowed origins and a simple handler
 	mockServer := mockNeo4jMCPServer(t)
-	mockServer.config.AllowUnauthenticatedInitialize = true
+	mockServer.config.Get().AllowUnauthenticatedInitialize = true
 
 	mockAnalytics := mockServer.anService.(*analytics_mocks.MockService)
 	mockAnalytics.EXPECT().NewUnauthenticatedJSONRPCEvent("initialize").Times(1)
@@ -770,7 +770,7 @@ func TestAuthMiddleware_AllowsUnauthenticatedInitialize(t *testing.T) {
 func TestAuthMiddleware_AllowsUnauthenticatedNotificationsInitialize(t *testing.T) {
 	// Build middleware chain with no allowed origins and a simple handler
 	mockServer := mockNeo4jMCPServer(t)
-	mockServer.config.AllowUnauthenticatedNotificationsInitialize = true
+	mockServer.config.Get().AllowUnauthenticatedNotificationsInitialize = true
 
 	mockAnalytics := mockServer.anService.(*analytics_mocks.MockService)
 	mockAnalytics.EXPECT().NewUnauthenticatedJSONRPCEvent("notifications/initialized").Times(1)
