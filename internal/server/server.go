@@ -35,15 +35,15 @@ const (
 	serverHTTPReadTimeout       = 15 * time.Second  // SECURITY: Maximum time to read entire request including body (prevents slow-read attacks)
 	serverHTTPWriteTimeout      = 60 * time.Second  // FUNCTIONALITY: Maximum time to write response (allows complex Neo4j queries and large result sets)
 	serverHTTPIdleTimeout       = 120 * time.Second // PERFORMANCE: Maximum time to keep idle keep-alive connections open (improves connection reuse)
-	mcpServerInstruction        = "This experimental MCP server allows interaction " +
-		"with your Neo4j database. Start by calling get-schema to understand " +
-		"the graph data model, available relationships, and indexes " +
-		"(including full-text indexes which can be queried with " +
-		"db.index.fulltext.queryNodes() and db.index.fulltext.queryRelationships()). " +
-		"Check list-gds-procedures for available graph analytics " +
-		"such as centrality, community detection, and pathfinding before " +
-		"writing manual traversals. Use read-cypher for queries and " +
-		"write-cypher for mutations."
+	mcpServerInstruction        = "This experimental MCP server lets you interact with a Neo4j database. " +
+		"Start by calling get-schema to see the node labels, relationship types, and " +
+		"properties in the graph (requires APOC). Use read-cypher for queries and " +
+		"write-cypher for mutations — full-text and vector indexes aren't listed by " +
+		"get-schema, but can still be queried directly via db.index.fulltext.queryNodes()/" +
+		"queryRelationships() and db.index.vector.queryNodes()/queryRelationships(). " +
+		"Other tools may be available depending on server configuration and installed " +
+		"plugins (e.g. graph analytics) — check the current tool list rather than " +
+		"assuming a fixed set."
 )
 
 // Neo4jMCPServer represents the MCP server instance
