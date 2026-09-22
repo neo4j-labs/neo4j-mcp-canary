@@ -331,7 +331,7 @@ Adding a new configuration parameter to the server (env var + CLI flag + config-
 
 ### Response Format (JSON, TOON, or Markdown)
 
-Tool responses (`read-cypher`, `write-cypher`, `get-schema`, `list-gds-procedures`) are rendered as JSON by default. Set `NEO4J_OUTPUT_FORMAT` (or `--neo4j-output-format`) to `toon` or `markdown` to render them differently instead:
+Tool responses (every tool in the table above) are rendered as JSON by default. Set `NEO4J_OUTPUT_FORMAT` (or `--neo4j-output-format`) to `toon` or `markdown` to render them differently instead:
 
 ```bash
 neo4j-mcp-canary --neo4j-output-format toon
@@ -473,19 +473,31 @@ To configure MCP clients (VSCode, Claude Desktop, etc.) to use the Neo4j MCP Can
 
 Provided tools:
 
-| Tool                  | Category   | ReadOnly | Purpose                                              | Notes                                                                                                                          |
-| --------------------- | ---------- | -------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `get-schema`          | `cypher`   | `true`   | Introspect labels, relationship types, property keys | Uses `apoc.meta.schema`. Sampling controlled by `NEO4J_SCHEMA_SAMPLE_SIZE`.                                                    |
-| `read-cypher`         | `cypher`   | `true`   | Execute arbitrary read-only Cypher                   | Rejects writes, schema/admin DDL, `EXPLAIN`, and `PROFILE`. See [Cypher Execution Safeguards](#cypher-execution-safeguards).   |
-| `write-cypher`        | `cypher`   | `false`  | Execute arbitrary Cypher (write mode)                | **Caution:** LLM-generated queries can cause harm. Use only in development environments. Not registered when `NEO4J_READ_ONLY=true`. |
-| `list-gds-procedures` | `gds`      | `true`   | List GDS procedures available in the Neo4j instance  | Disabled automatically if GDS is not installed.                                                                                |
-| `give-feedback`       | `feedback` | `true`   | Submit free-text feedback about the MCP server itself | For feedback on the server (tools, behaviour, docs), not on Cypher/database issues. Limited to 300 characters. See [Feedback](#feedback). |
+| Tool                            | Category   | ReadOnly | Purpose                                                            | Notes                                                                                                                                      |
+| -------------------------------- | ---------- | -------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get-schema`                    | `cypher`   | `true`   | Introspect labels, relationship types, property keys               | Uses `apoc.meta.schema`. Sampling controlled by `NEO4J_SCHEMA_SAMPLE_SIZE`.                                                                |
+| `read-cypher`                   | `cypher`   | `true`   | Execute arbitrary read-only Cypher                                  | Rejects writes, schema/admin DDL, `EXPLAIN`, and `PROFILE`. See [Cypher Execution Safeguards](#cypher-execution-safeguards).               |
+| `write-cypher`                  | `cypher`   | `false`  | Execute arbitrary Cypher (write mode)                                | **Caution:** LLM-generated queries can cause harm. Use only in development environments. Rejects `EXPLAIN`/`PROFILE` prefixes (see below). Not registered when `NEO4J_READ_ONLY=true`. |
+| `explain-cypher`                | `cypher`   | `true`   | Return a query's plan without executing it                          | Works for read and write statements alike, since `EXPLAIN` never executes. See [Query planning and profiling](#query-planning-and-profiling). |
+| `profile-cypher`                | `cypher`   | `false`  | Execute a query and return results plus a profiled plan with runtime stats | `dbHits`/`rows`/`time`/page-cache stats per operator. Not registered when `NEO4J_READ_ONLY=true`.                                          |
+| `list-constraints-and-indexes`  | `cypher`   | `true`   | List the database's constraints and indexes                         | Structured discovery — includes VECTOR/FULLTEXT rows if present. See [Schema management tools](#schema-management-tools).                 |
+| `create-constraint`             | `cypher`   | `false`  | Create a UNIQUENESS, KEY, or PROPERTY_EXISTENCE constraint            | `KEY`/`PROPERTY_EXISTENCE` require Enterprise Edition. Structured fields only — no Cypher required.                                        |
+| `drop-constraint`               | `cypher`   | `false`  | Drop a constraint by name                                            | Idempotent (`DROP CONSTRAINT ... IF EXISTS`).                                                                                              |
+| `create-index`                  | `cypher`   | `false`  | Create a RANGE, TEXT, POINT, or LOOKUP index                          | VECTOR/FULLTEXT indexes are created via the `search` category's `create-vector-index`/`create-fulltext-index` instead.                     |
+| `drop-index`                    | `cypher`   | `false`  | Drop an index by name                                                | Works for any index type, including vector/fulltext.                                                                                       |
+| `vector-search`                 | `search`   | `true`   | Approximate nearest-neighbor similarity search against a vector index | Auto-detects the target label/relationship type from the index. See [Vector and full-text search tools](#vector-and-full-text-search-tools). |
+| `fulltext-search`               | `search`   | `true`   | Lucene-backed full-text search against a fulltext index               | Same auto-detection as `vector-search`.                                                                                                     |
+| `create-vector-index`           | `search`   | `false`  | Create a vector index for similarity search                          | `filterableProperties` registers properties usable later in `vector-search`'s `filters`.                                                   |
+| `create-fulltext-index`         | `search`   | `false`  | Create a fulltext index for text search                              | Supports multiple labels/relationship types.                                                                                                |
+| `set-vector-property`           | `search`   | `false`  | Set a node or relationship's embedding vector property                | Uses `db.create.setNodeVectorProperty`/`setRelationshipVectorProperty`. Requires at least one filter.                                       |
+| `list-gds-procedures`           | `gds`      | `true`   | List GDS procedures available in the Neo4j instance                  | Disabled automatically if GDS is not installed.                                                                                             |
+| `give-feedback`                 | `feedback` | `true`   | Submit free-text feedback about the MCP server itself                | For feedback on the server (tools, behaviour, docs), not on Cypher/database issues. Limited to 300 characters. See [Feedback](#feedback). |
 
 ### Selecting which tools are exposed
 
-Every tool belongs to exactly one category (`cypher`, `gds`, or `feedback`, per the table above) and carries a label — its MCP title annotation (e.g. "Read Cypher"), shown to clients that display a friendly tool name.
+Every tool belongs to exactly one category (`cypher`, `gds`, `feedback`, or `search`, per the table above) and carries a label — its MCP title annotation (e.g. "Read Cypher"), shown to clients that display a friendly tool name.
 
-Tool selection can be narrowed in two ways, which combine with the existing `NEO4J_READ_ONLY`/GDS-availability filtering (a selection can only narrow the set further, never re-enable a tool those filters already excluded):
+Tool selection can be narrowed in two ways, which combine with the existing `NEO4J_READ_ONLY`/GDS-availability/search-version filtering (a selection can only narrow the set further, never re-enable a tool those filters already excluded):
 
 **Statically, at startup**, via `NEO4J_MCP_ENABLED_TOOLS` and/or `NEO4J_MCP_ENABLED_TOOL_CATEGORIES` (comma-separated; a tool is kept if it matches either list — see [Configuration Options](#configuration-options)):
 
@@ -530,11 +542,25 @@ When enabled, write tools (e.g. `write-cypher`) are not exposed to clients.
 - **Write operations** (`CREATE`, `MERGE`, `DELETE`, `SET`, `REMOVE`, ...) — rejected with a message directing the caller to `write-cypher`.
 - **Schema/DDL operations** (`CREATE INDEX`, `DROP CONSTRAINT`, ...) — rejected, same message.
 - **Admin commands** (`SHOW USERS`, `SHOW DATABASES`, ...) — rejected, same message.
-- **`EXPLAIN` prefix** — rejected with a dedicated message noting that runaway-query protection is already provided by the planner-estimate guard and the execution timeout, and pointing at `write-cypher` for a profiled plan.
-- **`PROFILE` prefix** — rejected with a message directing the caller to `write-cypher`.
+- **`EXPLAIN` prefix** — rejected with a message pointing at `explain-cypher` for the query plan, or `profile-cypher` for a profiled plan with runtime statistics.
+- **`PROFILE` prefix** — rejected with a message pointing at `profile-cypher`, which executes the query and returns both the results and a profiled plan. `write-cypher` also rejects an `EXPLAIN`/`PROFILE` prefix, for the same reason — see [Query planning and profiling](#query-planning-and-profiling).
 - **Read-only `SHOW` commands** (`SHOW INDEXES`, `SHOW CONSTRAINTS`, `SHOW PROCEDURES`, `SHOW FUNCTIONS`) — allowed.
 
 If the wrapped query produces a syntax error, the server strips the internal `EXPLAIN ` prefix from the error text, column offset, and caret alignment before returning — so the error reads as if the caller's original query had been submitted directly.
+
+### Query planning and profiling
+
+`explain-cypher` and `profile-cypher` cover the query-tuning workflow `read-cypher`/`write-cypher` deliberately don't handle: `explain-cypher` returns the planner's plan tree for any statement — read or write — without executing it, since `EXPLAIN` never runs the query. `profile-cypher` executes the statement and returns both the results and a profiled plan with per-operator runtime statistics (`dbHits`, `rows`, `time`, page cache hit ratio). Neither tool accepts a query already prefixed with `EXPLAIN`/`PROFILE` — each adds its own prefix internally and rejects a caller-supplied one with a message pointing at the other tool if that's what was actually wanted.
+
+### Schema management tools
+
+`list-constraints-and-indexes`, `create-constraint`, `drop-constraint`, `create-index`, and `drop-index` manage constraints and indexes via structured fields only — none of them accept or return raw Cypher. `create-constraint` supports `UNIQUENESS`, `KEY`, and `PROPERTY_EXISTENCE` constraints (`KEY`/`PROPERTY_EXISTENCE` require Enterprise Edition; Community Edition rejects them at creation time — retrying won't help). `create-index` supports `RANGE`, `TEXT`, `POINT`, and `LOOKUP` indexes; vector and fulltext indexes are created via the `search` category's `create-vector-index`/`create-fulltext-index` instead. `drop-index` works for any index type, including vector and fulltext ones. Every `create-*` tool always includes `IF NOT EXISTS`/`IF EXISTS` in the generated statement, so retrying with the same arguments is safe; when `name` is omitted, a generated name is returned in the response for later use with the matching `drop-*` tool.
+
+### Vector and full-text search tools
+
+The `search` category — `vector-search`, `fulltext-search`, `create-vector-index`, `create-fulltext-index`, `set-vector-property` — surfaces Cypher 25's `SEARCH` clause through structured fields only; no tool in this category accepts or returns raw Cypher. `vector-search`/`fulltext-search` auto-detect the target node label or relationship type from the index itself, so the caller only needs the index name. `vector-search`'s `filters` only work on properties registered as filterable at index-creation time via `create-vector-index`'s `filterableProperties` — filtering on any other property is a hard Neo4j limitation, not a tool restriction. Every tool takes a caller-supplied embedding (`[]float64`) — the server does not generate embeddings or manage AI-provider credentials.
+
+This category requires a server on calendar version >= `2026.09.0` or classic Aura >= `5.27-aura` (native full-text `SEARCH`-clause support shipped in Neo4j's 2026.09 release; vector search alone works from `2026.01`, but the whole category is gated behind the higher floor for consistency). Below that floor, the five tools are automatically excluded from `tools/list` rather than failing at call time — the same way `list-gds-procedures` is excluded when GDS isn't installed.
 
 ### Response format for `read-cypher` / `write-cypher`
 
@@ -564,7 +590,7 @@ Lessons from canary testing that help an LLM (or a human) get the most out of `r
 4. **Use parameters, including nested maps.** Parameter placeholders (`$name`) are bound from the `params` object; nested access works (`$config.thresholds.pr`). Missing required parameters produce a clear `ParameterMissing` error; extra parameters are silently ignored.
 5. **Be explicit about types in comparisons.** Cross-type comparisons like `t.amount > "foo"` evaluate to null and silently filter everything out — no error, just an empty result set. Validate incoming parameter types on the caller side when the result shape surprises you.
 6. **`SHOW INDEXES` / `SHOW CONSTRAINTS` are allowed.** Useful before writing a query that depends on an index, or for debugging why a match is slow.
-7. **`EXPLAIN` and `PROFILE` are not exposed on `read-cypher`.** Runaway-query protection is already handled by the planner-estimate guard and execution timeout. If you need a profiled plan with runtime stats, use `write-cypher` with `PROFILE`.
+7. **`EXPLAIN` and `PROFILE` are not exposed on `read-cypher`/`write-cypher`.** Runaway-query protection is already handled by the planner-estimate guard and execution timeout. Use `explain-cypher` for the query plan, or `profile-cypher` for a profiled plan with runtime stats.
 8. **Watch for duplicated payloads when returning paths.** `RETURN p, nodes(p), relationships(p)` triples the serialised payload. Return the path or its components, not both.
 9. **Long-running queries return a classified error.** When `NEO4J_CYPHER_TIMEOUT` fires, the error names the timeout value and suggests remediation (bound variable-length patterns, add `WHERE` filters, use `LIMIT`) instead of a raw `context deadline exceeded` from the driver.
 10. **`OPTIONAL MATCH` for missing data.** When looking up by ID where some IDs may not exist, `OPTIONAL MATCH` returns nulls for misses instead of dropping rows — better for batch lookups.
