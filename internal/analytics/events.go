@@ -69,13 +69,9 @@ type feedbackProperties struct {
 	Feedback string `json:"feedback"`
 }
 
-// ToolVectorInfo carries optional vector and index-related properties for tool events.
+// ToolVectorInfo carries optional vector and full-text-related properties for tool events.
 // When nil, no vector properties are included in the event.
 type ToolVectorInfo struct {
-	// VectorIndexCount is the number of VECTOR indexes detected in the get-schema response.
-	VectorIndexCount *int `json:"vectorIndex,omitempty"`
-	// FullTextIndexCount is the number of FULLTEXT indexes detected in the get-schema response.
-	FullTextIndexCount *int `json:"fullTextIndex,omitempty"`
 	// VectorSearch indicates whether the Cypher query uses vector index search
 	// (e.g. db.index.vector.queryNodes, db.index.vector.queryRelationships).
 	VectorSearch *bool `json:"vectorSearch,omitempty"`
@@ -91,13 +87,11 @@ type ToolVectorInfo struct {
 // Note: Neo4j connection info (version, edition, cypher version) is sent once in CONNECTION_INITIALIZED event
 type toolProperties struct {
 	baseProperties
-	ToolUsed           string `json:"tools_used"`
-	Success            bool   `json:"success"`
-	VectorIndexCount   *int   `json:"vectorIndex,omitempty"`
-	FullTextIndexCount *int   `json:"fullTextIndex,omitempty"`
-	VectorSearch       *bool  `json:"vectorSearch,omitempty"`
-	VectorPropertySet  *bool  `json:"vectorPropertySet,omitempty"`
-	FullTextSearch     *bool  `json:"fullTextSearch,omitempty"`
+	ToolUsed          string `json:"tools_used"`
+	Success           bool   `json:"success"`
+	VectorSearch      *bool  `json:"vectorSearch,omitempty"`
+	VectorPropertySet *bool  `json:"vectorPropertySet,omitempty"`
+	FullTextSearch    *bool  `json:"fullTextSearch,omitempty"`
 	// OutputFormat is the configured NEO4J_OUTPUT_FORMAT active for this call
 	// ("json" or "toon") — lets the Mixpanel stream break tool usage down by
 	// which response format callers are actually using.
@@ -174,8 +168,6 @@ func (a *Analytics) NewToolEvent(toolsUsed string, success bool, vectorInfo *Too
 		OutputFormat:   outputFormat,
 	}
 	if vectorInfo != nil {
-		props.VectorIndexCount = vectorInfo.VectorIndexCount
-		props.FullTextIndexCount = vectorInfo.FullTextIndexCount
 		props.VectorSearch = vectorInfo.VectorSearch
 		props.VectorPropertySet = vectorInfo.VectorPropertySet
 		props.FullTextSearch = vectorInfo.FullTextSearch

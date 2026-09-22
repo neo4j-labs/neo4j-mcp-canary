@@ -6,9 +6,7 @@ package server
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -24,10 +22,9 @@ import (
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/auth"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/eventing"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
-	"github.com/neo4j-labs/neo4j-mcp-canary/internal/queryapi"
-
-	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/readiness"
 )
 
 const (
@@ -59,6 +56,7 @@ type Neo4jMCPServer struct {
 	dbService          database.Service
 	version            string
 	anService          analytics.Service
+	events             *eventing.Emitter
 	gdsInstalled       bool
 	initMu             sync.Mutex
 	connectionVerified atomic.Bool
@@ -75,6 +73,7 @@ func NewNeo4jMCPServer(version string, cfg *config.Config, dbService database.Se
 		dbService:       dbService,
 		version:         version,
 		anService:       anService,
+		events:          eventing.NewEmitter(anService, dbService, cfg, version),
 		gdsInstalled:    false,
 	}
 
@@ -108,23 +107,24 @@ func (s *Neo4jMCPServer) Start() error {
 		// in case of http mode, the initialization process is delayed until the credentials are available.
 		// when the first client is performing the initialize request then the server perform
 
-		s.emitServerStartupEvent()
+		s.events.EmitServerStartup()
 
 		return s.StartHTTPServer()
 	case config.TransportModeStdio:
 		{
-			err := s.verifyRequirements(context.Background())
+			result, err := readiness.NewChecker(s.dbService).Verify(context.Background())
 			if err != nil {
 				return err
 			}
+			s.gdsInstalled = result.GDSInstalled
 
 			// Register tools
 			if err := s.registerTools(); err != nil {
 				return fmt.Errorf("failed to register tools: %w", err)
 			}
 
-			s.emitServerStartupEvent()
-			s.emitConnectionInitializedEvent(context.Background())
+			s.events.EmitServerStartup()
+			s.events.EmitConnectionInitialized(context.Background())
 
 			return s.mcpServer.ServeStdio(context.Background())
 		}
@@ -167,123 +167,6 @@ func parseCommaList(s string) []string {
 		}
 	}
 	return out
-}
-
-// verifyRequirements check the Neo4j requirements:
-// - A valid connection with a Neo4j instance.
-// - The ability to perform a read query (database name is correctly defined).
-// - In case GDS is not installed a flag is set in the server and tools will be registered accordingly
-func (s *Neo4jMCPServer) verifyRequirements(ctx context.Context) error {
-	err := s.dbService.VerifyConnectivity(ctx)
-	if err != nil {
-		return err
-	}
-
-	// Call gds.version procedure to determine if GDS is installed
-	records, err := s.dbService.ExecuteReadQuery(ctx, "RETURN gds.version() as gdsVersion", nil)
-	if err != nil {
-		// GDS is optional, so we log a warning and continue, assuming it's not installed.
-		log.Print("Impossible to verify GDS installation.")
-		s.gdsInstalled = false
-	} else if len(records) == 1 && len(records[0].Values) == 1 {
-		_, ok := records[0].Values[0].(string)
-		if ok {
-			s.gdsInstalled = true
-		}
-	}
-
-	return nil
-}
-
-// emitServerStartupEvent emits the server startup event immediately with available info (no DB query)
-func (s *Neo4jMCPServer) emitServerStartupEvent() {
-	// DetectMode is a pure scheme check (no network access), so it's safe to
-	// recompute here rather than threading the mode through the constructor.
-	// A malformed URI would already have failed at connection-setup time in
-	// main.go before the server ever got this far, so the error here is
-	// ignored — ModeBolt is DetectMode's safe zero-value fallback.
-	connMode, _ := queryapi.DetectMode(s.config.URI)
-	s.anService.EmitEvent(s.anService.NewStartupEvent(s.config.TransportMode, s.config.HTTPTLSEnabled, s.version, connMode.String()))
-}
-
-// emitConnectionInitializedEvent emits the connection initialized event with DB information (STDIO mode only)
-func (s *Neo4jMCPServer) emitConnectionInitializedEvent(ctx context.Context) {
-	if !s.anService.IsEnabled() {
-		return
-	}
-
-	records, err := s.dbService.ExecuteReadQuery(ctx, "CALL dbms.components()", map[string]any{})
-	if err != nil {
-		slog.Debug("Failed to collect connection metadata", "error", err.Error())
-		return
-	}
-
-	connInfo := recordsToConnectionEventInfo(records)
-	s.anService.EmitEvent(s.anService.NewConnectionInitializedEvent(connInfo))
-}
-
-// recordsToConnectionEventInfo converts dbms.components() records to ConnectionEventInfo
-func recordsToConnectionEventInfo(records []*neo4j.Record) analytics.ConnectionEventInfo {
-	// Default to "unknown" for all failure cases (empty records, malformed data, etc.)
-	connInfo := analytics.ConnectionEventInfo{
-		Neo4jVersion:  "unknown",
-		Edition:       "unknown",
-		CypherVersion: []string{"unknown"},
-	}
-
-	for _, record := range records {
-		nameRaw, ok := record.Get("name")
-		if !ok {
-			slog.Debug("missing 'name' column in dbms.components record")
-			continue
-		}
-		name, ok := nameRaw.(string)
-		if !ok {
-			slog.Debug("invalid 'name' type in dbms.components record")
-			continue
-		}
-
-		editionRaw, ok := record.Get("edition")
-		if !ok {
-			slog.Debug("missing 'edition' column in dbms.components record")
-			continue
-		}
-		edition, ok := editionRaw.(string)
-		if !ok {
-			slog.Debug("invalid 'edition' type in dbms.components record")
-			continue
-		}
-
-		versionsRaw, ok := record.Get("versions")
-		if !ok {
-			slog.Debug("missing 'versions' column in dbms.components record")
-			continue
-		}
-		versions, ok := versionsRaw.([]any)
-		if !ok {
-			slog.Debug("invalid 'versions' type in dbms.components record")
-			continue
-		}
-
-		switch name {
-		case "Neo4j Kernel":
-			if len(versions) > 0 {
-				if v, ok := versions[0].(string); ok {
-					connInfo.Neo4jVersion = v
-				}
-			}
-			connInfo.Edition = edition
-		case "Cypher":
-			var stringVersions []string
-			for _, v := range versions {
-				if s, ok := v.(string); ok {
-					stringVersions = append(stringVersions, s)
-				}
-			}
-			connInfo.CypherVersion = stringVersions
-		}
-	}
-	return connInfo
 }
 
 // buildTLSConfig creates a TLS configuration with security best practices
@@ -405,7 +288,7 @@ func (s *Neo4jMCPServer) StartHTTPServer() error {
 
 // configureHooks sets up MCP SDK hooks for tool call tracking
 func (s *Neo4jMCPServer) configureHooks() {
-	s.mcpServer.OnAfterCallTool(s.handleToolCallComplete)
+	s.mcpServer.OnAfterCallTool(s.events.OnToolCallComplete)
 	if s.config.TransportMode == config.TransportModeHTTP {
 		// The MCP client negotiates either the classic "initialize" handshake or,
 		// when both client and server support it, the newer stateless "discover"
@@ -445,7 +328,7 @@ func (s *Neo4jMCPServer) toolAccessFilter(ctx context.Context) (map[string]bool,
 	return allowed, true
 }
 
-// verifyOnFirstRequest runs verifyRequirements, conditionally registers GDS
+// verifyOnFirstRequest runs the readiness check, conditionally registers GDS
 // tools, and emits the connection-initialized event exactly once, on the
 // first request handled in HTTP mode (initialize or discover).
 func (s *Neo4jMCPServer) verifyOnFirstRequest(ctx context.Context) {
@@ -463,150 +346,18 @@ func (s *Neo4jMCPServer) verifyOnFirstRequest(ctx context.Context) {
 	}
 
 	slog.Info("Verify server requirements...")
-	if err := s.verifyRequirements(ctx); err != nil {
+	result, err := readiness.NewChecker(s.dbService).Verify(ctx)
+	if err != nil {
 		slog.Error("Error during verification", "error", err)
 		return
 	}
+	s.gdsInstalled = result.GDSInstalled
 
 	if s.gdsInstalled {
 		s.addGDSTools()
 	}
 
-	s.emitConnectionInitializedEvent(ctx)
+	s.events.EmitConnectionInitialized(ctx)
 
 	s.connectionVerified.Store(true)
-}
-
-// handleToolCallComplete is called after every tool call completes.
-func (s *Neo4jMCPServer) handleToolCallComplete(_ context.Context, request *mcpsdk.CallToolRequest, result *mcpsdk.CallToolResult) {
-	if s.anService == nil || !s.anService.IsEnabled() {
-		return
-	}
-
-	toolName := request.Params.Name
-
-	success := true
-	if result != nil {
-		success = !result.IsError
-	}
-
-	// Build vector info based on tool type
-	var vectorInfo *analytics.ToolVectorInfo
-	switch toolName {
-	case "get-schema":
-		vectorInfo = extractSchemaVectorInfo(result)
-	case "read-cypher", "write-cypher":
-		vectorInfo = extractCypherVectorInfo(request)
-	case "vector-search":
-		vectorSearchTrue := true
-		vectorInfo = &analytics.ToolVectorInfo{
-			VectorSearch: &vectorSearchTrue,
-		}
-	}
-
-	// Emit tool event (connection info sent separately in CONNECTION_INITIALIZED event)
-	s.anService.EmitEvent(s.anService.NewToolEvent(toolName, success, vectorInfo, s.config.OutputFormat))
-
-	// Handle GDS events for cypher tools
-	if toolName == "read-cypher" || toolName == "write-cypher" {
-		s.emitGDSEventsIfNeeded(request)
-	}
-}
-
-// extractSchemaVectorInfo parses the get-schema result to count VECTOR indexes.
-// Returns nil if the result cannot be parsed (graceful degradation — analytics
-// should never break tool execution).
-func extractSchemaVectorInfo(result *mcpsdk.CallToolResult) *analytics.ToolVectorInfo {
-	if result == nil || result.IsError || len(result.Content) == 0 {
-		return nil
-	}
-	textContent, ok := mcpsdk.AsTextContent(result.Content[0])
-	if !ok {
-		return nil
-	}
-
-	// Minimal struct to extract just the indexes type field
-	var schema struct {
-		Indexes []struct {
-			Type string `json:"type"`
-		} `json:"indexes"`
-	}
-	if err := json.Unmarshal([]byte(textContent.Text), &schema); err != nil {
-		slog.Debug("failed to parse get-schema result for vector analytics", "error", err)
-		return nil
-	}
-
-	vectorCount := 0
-	fulltextCount := 0
-	for _, idx := range schema.Indexes {
-		if idx.Type == "VECTOR" {
-			vectorCount++
-		}
-		if idx.Type == "FULLTEXT" {
-			fulltextCount++
-		}
-	}
-
-	return &analytics.ToolVectorInfo{
-		VectorIndexCount:   &vectorCount,
-		FullTextIndexCount: &fulltextCount,
-	}
-}
-
-// extractCypherVectorInfo inspects a Cypher query to detect vector search, vector property set,
-// and full-text search operations. Detection is based on well-known procedure names and Cypher patterns.
-func extractCypherVectorInfo(request *mcpsdk.CallToolRequest) *analytics.ToolVectorInfo {
-	queryRaw, ok := request.Params.Arguments["query"]
-	if !ok {
-		return nil
-	}
-	queryStr, ok := queryRaw.(string)
-	if !ok {
-		return nil
-	}
-
-	lowerQuery := strings.ToLower(queryStr)
-
-	// Detect vector search: db.index.vector.queryNodes / db.index.vector.queryRelationships
-	vectorSearch := strings.Contains(lowerQuery, "db.index.vector.query")
-
-	// Detect vector property set: db.create.setNodeVectorProperty / db.create.setRelationshipVectorProperty
-	vectorPropertySet := strings.Contains(lowerQuery, "db.create.setnodevectorproperty") ||
-		strings.Contains(lowerQuery, "db.create.setrelationshipvectorproperty")
-
-	// Detect full-text search: db.index.fulltext.queryNodes / db.index.fulltext.queryRelationships
-	fullTextSearch := strings.Contains(lowerQuery, "db.index.fulltext.querynodes") ||
-		strings.Contains(lowerQuery, "db.index.fulltext.queryrelationships")
-
-	// Only return info if at least one operation was detected
-	if !vectorSearch && !vectorPropertySet && !fullTextSearch {
-		return nil
-	}
-
-	return &analytics.ToolVectorInfo{
-		VectorSearch:      &vectorSearch,
-		VectorPropertySet: &vectorPropertySet,
-		FullTextSearch:    &fullTextSearch,
-	}
-}
-
-// emitGDSEventsIfNeeded checks if the cypher query contains GDS calls and emits appropriate events
-func (s *Neo4jMCPServer) emitGDSEventsIfNeeded(request *mcpsdk.CallToolRequest) {
-	queryRaw, ok := request.Params.Arguments["query"]
-	if !ok {
-		return
-	}
-
-	queryStr, ok := queryRaw.(string)
-	if !ok {
-		return
-	}
-
-	lowerQuery := strings.ToLower(queryStr)
-	if strings.Contains(lowerQuery, "call gds.graph.project") {
-		s.anService.EmitEvent(s.anService.NewGDSProjCreatedEvent())
-	}
-	if strings.Contains(lowerQuery, "call gds.graph.drop") {
-		s.anService.EmitEvent(s.anService.NewGDSProjDropEvent())
-	}
 }

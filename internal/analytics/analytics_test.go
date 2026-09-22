@@ -220,9 +220,6 @@ func TestEventCreation(t *testing.T) {
 			t.Errorf("unexpected output_format: got %v, want %v", props["output_format"], config.OutputFormatJSON)
 		}
 		// Vector properties should not be present when vectorInfo is nil
-		if _, exists := props["vectorIndex"]; exists {
-			t.Errorf("vectorIndex should not be present when vectorInfo is nil")
-		}
 		if _, exists := props["vectorSearch"]; exists {
 			t.Errorf("vectorSearch should not be present when vectorInfo is nil")
 		}
@@ -236,67 +233,6 @@ func TestEventCreation(t *testing.T) {
 		props := assertBaseProperties(t, event.Properties)
 		if props["output_format"] != string(config.OutputFormatTOON) {
 			t.Errorf("unexpected output_format: got %v, want %v", props["output_format"], config.OutputFormatTOON)
-		}
-	})
-
-	t.Run("NewToolEvent with vector index count for get-schema", func(t *testing.T) {
-		count := 3
-		vectorInfo := &analytics.ToolVectorInfo{
-			VectorIndexCount: &count,
-		}
-		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo, config.OutputFormatJSON)
-		props := assertBaseProperties(t, event.Properties)
-		if props["tools_used"] != "get-schema" {
-			t.Errorf("unexpected tools_used: got %v, want %v", props["tools_used"], "get-schema")
-		}
-		if props["vectorIndex"] != float64(3) {
-			t.Errorf("unexpected vectorIndex: got %v, want %v", props["vectorIndex"], 3)
-		}
-		// vectorSearch and vectorPropertySet should not be present
-		if _, exists := props["vectorSearch"]; exists {
-			t.Errorf("vectorSearch should not be present for get-schema")
-		}
-	})
-
-	t.Run("NewToolEvent with zero vector indexes for get-schema", func(t *testing.T) {
-		count := 0
-		vectorInfo := &analytics.ToolVectorInfo{
-			VectorIndexCount: &count,
-		}
-		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo, config.OutputFormatJSON)
-		props := assertBaseProperties(t, event.Properties)
-		// Even with 0, the field should be present since the pointer is non-nil
-		if props["vectorIndex"] != float64(0) {
-			t.Errorf("unexpected vectorIndex: got %v, want %v", props["vectorIndex"], 0)
-		}
-	})
-
-	t.Run("NewToolEvent with fulltext index count for get-schema", func(t *testing.T) {
-		vectorCount := 2
-		fulltextCount := 5
-		vectorInfo := &analytics.ToolVectorInfo{
-			VectorIndexCount:   &vectorCount,
-			FullTextIndexCount: &fulltextCount,
-		}
-		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo, config.OutputFormatJSON)
-		props := assertBaseProperties(t, event.Properties)
-		if props["vectorIndex"] != float64(2) {
-			t.Errorf("unexpected vectorIndex: got %v, want %v", props["vectorIndex"], 2)
-		}
-		if props["fullTextIndex"] != float64(5) {
-			t.Errorf("unexpected fullTextIndex: got %v, want %v", props["fullTextIndex"], 5)
-		}
-	})
-
-	t.Run("NewToolEvent without fulltext index count omits field", func(t *testing.T) {
-		vectorCount := 1
-		vectorInfo := &analytics.ToolVectorInfo{
-			VectorIndexCount: &vectorCount,
-		}
-		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo, config.OutputFormatJSON)
-		props := assertBaseProperties(t, event.Properties)
-		if _, exists := props["fullTextIndex"]; exists {
-			t.Errorf("fullTextIndex should not be present when not set")
 		}
 	})
 
@@ -330,11 +266,11 @@ func TestEventCreation(t *testing.T) {
 	})
 
 	t.Run("NewToolEvent without full-text search omits field", func(t *testing.T) {
-		vectorCount := 1
+		vectorSearch := true
 		vectorInfo := &analytics.ToolVectorInfo{
-			VectorIndexCount: &vectorCount,
+			VectorSearch: &vectorSearch,
 		}
-		event := analyticsService.NewToolEvent("get-schema", true, vectorInfo, config.OutputFormatJSON)
+		event := analyticsService.NewToolEvent("read-cypher", true, vectorInfo, config.OutputFormatJSON)
 		props := assertBaseProperties(t, event.Properties)
 		if _, exists := props["fullTextSearch"]; exists {
 			t.Errorf("fullTextSearch should not be present when not set")
