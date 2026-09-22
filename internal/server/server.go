@@ -38,8 +38,8 @@ const (
 	serverHTTPReadTimeout       = 15 * time.Second  // SECURITY: Maximum time to read entire request including body (prevents slow-read attacks)
 	serverHTTPWriteTimeout      = 60 * time.Second  // FUNCTIONALITY: Maximum time to write response (allows complex Neo4j queries and large result sets)
 	serverHTTPIdleTimeout       = 120 * time.Second // PERFORMANCE: Maximum time to keep idle keep-alive connections open (improves connection reuse)
-	mcpServerInstruction        = "This is the Neo4j official MCP server providing tool calling to interact " +
-		"with your Neo4j database. Always start by calling get-schema to understand " +
+	mcpServerInstruction        = "This experimental MCP server allows interaction " +
+		"with your Neo4j database. Start by calling get-schema to understand " +
 		"the graph data model, available relationships, and indexes " +
 		"(including full-text indexes which can be queried with " +
 		"db.index.fulltext.queryNodes() and db.index.fulltext.queryRelationships()). " +
