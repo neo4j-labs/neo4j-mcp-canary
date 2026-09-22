@@ -8,11 +8,9 @@ Built on the source of the official Model Context Protocol (MCP) server for Neo4
 
 As it is a labs project, be aware that:
 
-- It is not supported.
-- It may contain breaking changes between its own releases and with the official Neo4j MCP server.
-- It should be tested before using.
-
-You are welcome to contribute — we are always open to new ideas, especially in this canary channel.
+- It is not supported
+- It may contain breaking changes between its own releases and with the official Neo4j MCP server
+- It should be tested before using
 
 > Do not assume the canary will work for your situation. Test first.
 
@@ -26,7 +24,7 @@ You are welcome to contribute — we are always open to new ideas, especially in
 
 ## Startup Checks & Adaptive Operation
 
-The server performs several pre-flight checks at startup to ensure your environment is correctly configured.
+The server performs several checks to ensure your environment is correctly configured.
 
 **STDIO Mode — Mandatory Requirements**
 In STDIO mode, the server verifies the following. If any check fails (e.g. invalid configuration, incorrect credentials, missing APOC), the server will not start:
@@ -34,6 +32,7 @@ In STDIO mode, the server verifies the following. If any check fails (e.g. inval
 - A valid connection to your Neo4j instance.
 - The ability to execute queries.
 - The presence of the APOC plugin.
+- Minimum version check for use of Query API to communicate with the datatbase
 
 **HTTP Mode — Verification Skipped**
 In HTTP mode, startup verification checks are skipped because credentials come from per-request auth headers. The server starts immediately without connecting to Neo4j. The one exception is [Query API mode](#connecting-via-the-query-api-instead-of-bolt): its minimum-version check runs at startup in both transport modes, since it only needs an unauthenticated GET and doesn't depend on per-request credentials.
@@ -43,7 +42,7 @@ If an optional dependency is missing, the server starts in adaptive mode. For in
 
 ## Installation (Binary)
 
-Releases: https://github.com/neo4j-labs/neo4j-mcp-canary/releases
+Releases: [Canary MCP releases](https://github.com/neo4j-labs/neo4j-mcp-canary/releases)
 
 1. Download the archive for your OS/arch.
 2. Extract and place `neo4j-mcp-canary` on your `PATH`.
@@ -73,7 +72,7 @@ Should print the installed version.
 
 ## Building from Source
 
-Requires Go 1.25.3+ (see `go.mod`).
+Requires Go 1.26+ (see `go.mod`).
 
 Build for your current platform with [Task](https://taskfile.dev):
 
@@ -116,9 +115,9 @@ Official multi-platform release archives (including Windows) are built by
 [Installation (Binary)](#installation-binary) to download those instead of
 building locally.
 
-## Transport Modes
+## MCP Transport Modes
 
-The Neo4j MCP Canary server supports two transport modes:
+The Neo4j MCP Canary server supports two communication transport modes
 
 - **STDIO** (default): Standard MCP communication via stdin/stdout for desktop clients (Claude Desktop, VSCode).
 - **HTTP**: RESTful HTTP server with per-request Bearer token or Basic Authentication for web-based clients and multi-tenant scenarios. Where the standard `Authorization` header cannot be used, a custom header name can be configured.
@@ -149,7 +148,7 @@ If you do not need these, enforce authentication individually via the variables 
 | `NEO4J_HTTP_ALLOW_UNAUTHENTICATED_PING`                      | `--neo4j-http-allow-unauthenticated-ping`                  | `true`  | Allow unauthenticated ping health checks           |
 | `NEO4J_HTTP_ALLOW_UNAUTHENTICATED_TOOLS_LIST`                | `--neo4j-http-allow-unauthenticated-tools-list`            | `true`  | Allow unauthenticated tool listing                 |
 | `NEO4J_HTTP_ALLOW_UNAUTHENTICATED_INITIALIZE`                | `--neo4j-http-allow-unauthenticated-initialize`            | `true`  | Allow unauthenticated initialize                   |
-| `NEO4J_HTTP_ALLOW_UNAUTHENTICATED_NOTIFICATIONS_INITIALIZE`  | `--neo4j-http-allow-unauthenticated-notifications-initialize` | `true`  | Allow unauthenticated `notifications/initialize`   |
+| `NEO4J_HTTP_ALLOW_UNAUTHENTICATED_NOTIFICATIONS_INITIALIZE`  | `--neo4j-http-allow-unauthenticated-notifications-initialize` | `true` | Allow unauthenticated `notifications/initialize` |
 
 ## TLS/HTTPS Configuration
 
@@ -165,7 +164,7 @@ When using HTTP transport, enable TLS for secure communication via the variables
 | `NEO4J_MCP_HTTP_TOOLS_HEADER_NAME` | `--neo4j-mcp-http-tools-header-name` | `X-MCP-Tools`                  | Header a client uses to select tools by name for one request |
 | `NEO4J_MCP_HTTP_TOOL_CATEGORIES_HEADER_NAME` | `--neo4j-mcp-http-tool-categories-header-name` | `X-MCP-Tool-Categories` | Header a client uses to select tools by category for one request |
 
-**Security Configuration**
+### Security Configuration
 
 - **Minimum TLS Version:** TLS 1.2 (TLS 1.3 negotiated when available)
 - **Cipher Suites:** Go's secure default cipher suites
