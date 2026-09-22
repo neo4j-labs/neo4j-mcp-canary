@@ -1,0 +1,71 @@
+// Copyright (c) "Neo4j"
+// Neo4j Sweden AB [http://neo4j.com]
+
+package search
+
+import (
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
+)
+
+// SetVectorPropertyInput is the struct the handler binds incoming
+// arguments into via request.BindArguments. The advertised JSON schema is
+// declared explicitly in SetVectorPropertySpec below.
+type SetVectorPropertyInput struct {
+	EntityType       string    `json:"entityType"`
+	Label            string    `json:"label,omitempty"`
+	RelationshipType string    `json:"relationshipType,omitempty"`
+	Filters          []Filter  `json:"filters"`
+	VectorProperty   string    `json:"vectorProperty"`
+	Vector           []float64 `json:"vector"`
+}
+
+// setVectorPropertyOutputSchema is computed once at package init since
+// SetVectorPropertyOutput's shape never changes between calls.
+var setVectorPropertyOutputSchema = mcpsdk.MustOutputSchemaFor[SetVectorPropertyOutput]()
+
+// SetVectorPropertySpec declares the MCP tool schema for
+// set-vector-property.
+//
+// Every input is a structured field and the output is a structured
+// confirmation object — this tool never accepts or returns raw Cypher; it
+// calls db.create.setNodeVectorProperty/setRelationshipVectorProperty
+// internally (a plain SET does not store a vector in the internal format a
+// vector index can consume).
+func SetVectorPropertySpec() mcpsdk.Tool {
+	return mcpsdk.NewTool("set-vector-property",
+		mcpsdk.WithDescription(`
+		Set an embedding vector property on one or more matching nodes or relationships via structured fields — it does not accept or return raw Cypher.
+		Internally this uses Neo4j's db.create.setNodeVectorProperty/db.create.setRelationshipVectorProperty procedures, which is required for the property to be stored in the format a vector index can actually consume — a plain property SET would not work for this purpose.
+		At least one filter is required, to avoid silently overwriting every matching entity's vector; there is no way to bypass this with an empty filter list.
+		If more than one entity matches the filters, all of them are updated in the same call — this is intentional bulk-update support, not a bug.`),
+		mcpsdk.WithString("entityType",
+			mcpsdk.Required(),
+			mcpsdk.Enum("NODE", "RELATIONSHIP"),
+			mcpsdk.Description("Whether to update a node label (NODE) or a relationship type (RELATIONSHIP)."),
+		),
+		mcpsdk.WithString("label",
+			mcpsdk.Description("The node label to match. Required when entityType is NODE; must not be set when entityType is RELATIONSHIP."),
+		),
+		mcpsdk.WithString("relationshipType",
+			mcpsdk.Description("The relationship type to match. Required when entityType is RELATIONSHIP; must not be set when entityType is NODE."),
+		),
+		mcpsdk.WithArray("filters", "object",
+			mcpsdk.Required(),
+			mcpsdk.Description("Required, non-empty. AND-joined predicates: each item is {property, operator, value} where operator is one of =, <, >, <=, >=, IN. At least one filter is required to avoid overwriting every matching entity's vector."),
+		),
+		mcpsdk.WithString("vectorProperty",
+			mcpsdk.Required(),
+			mcpsdk.Description("The name of the property to store the embedding vector under."),
+		),
+		mcpsdk.WithArray("vector", "number",
+			mcpsdk.Required(),
+			mcpsdk.Description("The embedding vector to store."),
+		),
+		mcpsdk.WithTitleAnnotation("Set Vector Property"),
+		mcpsdk.WithReadOnlyHintAnnotation(false),
+		mcpsdk.WithDestructiveHintAnnotation(true),
+		mcpsdk.WithIdempotentHintAnnotation(true),
+		mcpsdk.WithOpenWorldHintAnnotation(true),
+		mcpsdk.WithOutputSchema(setVectorPropertyOutputSchema),
+	)
+}

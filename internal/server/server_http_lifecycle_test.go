@@ -85,7 +85,7 @@ func TestNeo4jMCPServerHTTPMode(t *testing.T) {
 		mockDB := db.NewMockService(ctrl)
 		mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(gdsVersionRecord("2.22.0"), nil)
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(2)
 
 		s, errChan := createHTTPServer(t, cfg, mockDB, analyticsService)
 
@@ -121,7 +121,7 @@ func TestNeo4jMCPServerHTTPMode(t *testing.T) {
 		mockDB := db.NewMockService(ctrl)
 		mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(gdsVersionRecord("2.22.0"), nil)
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(2)
 
 		s, errChan := createHTTPServer(t, cfg, mockDB, analyticsService)
 
@@ -143,7 +143,7 @@ func TestNeo4jMCPServerHTTPMode(t *testing.T) {
 		mockDB := db.NewMockService(ctrl)
 		mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(gdsVersionRecord("2.22.0"), nil)
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(2)
 
 		s, errChan := createHTTPServer(t, cfg, mockDB, analyticsService)
 
@@ -166,7 +166,7 @@ func TestNeo4jMCPServerHTTPMode(t *testing.T) {
 		mockDB := db.NewMockService(ctrl)
 		mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(nil, fmt.Errorf("Unknown function 'gds.version'"))
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(2)
 
 		s, errChan := createHTTPServer(t, cfg, mockDB, analyticsService)
 

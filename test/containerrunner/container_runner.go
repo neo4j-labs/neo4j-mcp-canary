@@ -119,9 +119,17 @@ func Close(ctx context.Context) {
 // this SDK build insists on. Using a calendar-versioned image here keeps the
 // integration tests both able to pass the version gate at all (as a
 // self-managed image) and wire-compatible with our current SDK pin.
+//
+// The default is pinned at 2026.09, not the bare 2026.07 floor above,
+// because internal/tools/search's tools depend on Cypher 25's SEARCH
+// clause, whose full-text support only shipped in the 2026.09 calendar
+// release (vector search alone only needed 2026.01). Every other
+// integration/e2e test still only strictly needs >= 2026.07, so bumping
+// this default doesn't narrow what NEO4J_IMAGE values remain valid — it
+// just changes what running the suite with no override exercises.
 func createNeo4jContainer(ctx context.Context) (testcontainers.Container, string, string, error) {
 	req := testcontainers.ContainerRequest{
-		Image:        config.GetEnvWithDefault("NEO4J_IMAGE", "neo4j:2026.07-community"),
+		Image:        config.GetEnvWithDefault("NEO4J_IMAGE", "neo4j:2026.09-community"),
 		ExposedPorts: []string{"7687/tcp", "7474/tcp"},
 		Env: map[string]string{
 			"NEO4J_AUTH":        fmt.Sprintf("%s/%s", config.GetEnvWithDefault("NEO4J_USERNAME", "neo4j"), config.GetEnvWithDefault("NEO4J_PASSWORD", "password")),

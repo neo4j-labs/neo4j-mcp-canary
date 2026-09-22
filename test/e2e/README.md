@@ -141,10 +141,10 @@ Use `USE_CONTAINER` to control whether tests start a Neo4j container or connect 
 | -------------------- | ------- | ---------------------------------------------------------------------------- |
 | `USE_CONTAINER`      | `true`  | When `true`, starts a Docker container; when `false`, uses external database |
 
-**Example with container (default):**
+**Example with container (default image is `neo4j:2026.09-community`; shown explicitly here):**
 
 ```bash
-NEO4J_IMAGE=neo4j:2026.07-community \
+NEO4J_IMAGE=neo4j:2026.09-community \
 NEO4J_USERNAME=admin \
 NEO4J_PASSWORD=secret \
 go test -tags=e2e ./test/e2e/... -v
@@ -163,6 +163,7 @@ go test -tags=e2e ./test/e2e/... -v
 ## Important Notes
 
 - `NEO4J_IMAGE` must resolve to a calendar-versioned release (>= `2026.07`) or a classic-Aura release (>= `5.26-aura`) — the Query API tests rely on `queryapi.CheckMinimumVersion`'s floor and will fail against an older or bare classic-versioned image.
+- The `search` tool category needs a server that clears its own version floor (>= `2026.09.0` calendar or `5.27-aura`) — the default image satisfies this; `server_initialization_test.go`'s tool-count assertions will fail against an older image because the search tools won't register.
 - Always use `t.Parallel()` for parallel execution
 - Always use the `UniqueLabel` returned by `SeedNode()` or `GetUniqueLabel()` in your queries for isolation
 - Test data is automatically tagged with unique labels and cleaned up after each test

@@ -50,10 +50,18 @@ returning — don't remove either wait condition, both are load-bearing (a
 Bolt-only wait let `TestQueryAPIVersionGate` intermittently race against a
 not-yet-serving HTTP port).
 
-**Image version matters.** `NEO4J_IMAGE` (default `neo4j:2026.07-community`)
+**Image version matters.** `NEO4J_IMAGE` (default `neo4j:2026.09-community`)
 must be a calendar-versioned release ≥ `2026.07` or a classic-Aura release ≥
 `5.26-aura` — the Query API tests depend on `queryapi.CheckMinimumVersion`'s
-floor and fail fast against anything older or a bare classic version.
+floor and fail fast against anything older or a bare classic version. The
+default is pinned at `2026.09` rather than the bare `2026.07` floor because
+`search_lifecycle_test.go` (and the `search` category's tools in general)
+depend on the SEARCH clause's full-text support, which only shipped in
+2026.09 — an older image below that (even one that satisfies the Query
+API's own `2026.07` floor) will fail those specific tests with a genuine
+Neo4j syntax error, not a graceful skip, since integration tests call tool
+handlers directly and bypass the runtime version gate
+(`internal/readiness.Checker`) that only governs MCP tool registration.
 
 ## Architecture conventions an agent must respect
 

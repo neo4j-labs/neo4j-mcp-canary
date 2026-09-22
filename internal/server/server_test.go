@@ -53,7 +53,7 @@ func TestNewNeo4jMCPServer(t *testing.T) {
 		mockDB := db.NewMockService(ctrl)
 		mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(gdsVersionRecord("2.22.0"), nil)
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(2)
 
 		s := server.NewNeo4jMCPServer("test-version", cfg, mockDB, analyticsService)
 		if s == nil {
@@ -85,7 +85,7 @@ func TestNewNeo4jMCPServer(t *testing.T) {
 		mockDB := db.NewMockService(ctrl)
 		mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(gdsVersionRecord("2.22.0"), nil)
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(2)
 
 		s := server.NewNeo4jMCPServer("test-version", cfg, mockDB, analyticsService)
 		if s == nil {
@@ -108,7 +108,7 @@ func TestNewNeo4jMCPServer(t *testing.T) {
 		mockDB := db.NewMockService(ctrl)
 		mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(nil, fmt.Errorf("Unknown function 'gds.version'"))
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(2)
 
 		s := server.NewNeo4jMCPServer("test-version", cfg, mockDB, analyticsService)
 		if s == nil {
@@ -125,7 +125,7 @@ func TestNewNeo4jMCPServer(t *testing.T) {
 		mockDB := db.NewMockService(ctrl)
 		mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
 		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).Times(1).Return(gdsVersionRecord("2.22.0"), nil)
-		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1)
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(2)
 
 		s := server.NewNeo4jMCPServer("test-version", cfg, mockDB, analyticsService)
 		if s == nil {
@@ -154,7 +154,7 @@ func TestNewNeo4jMCPServerEvents(t *testing.T) {
 	mockDB := db.NewMockService(ctrl)
 	mockDB.EXPECT().VerifyConnectivity(gomock.Any()).AnyTimes()
 	mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).AnyTimes().Return(gdsVersionRecord("2.22.0"), nil)
-	mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(1).Return([]*neo4j.Record{
+	mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(2).Return([]*neo4j.Record{
 		{
 			Keys:   []string{"name", "edition", "versions"},
 			Values: []any{"Neo4j Kernel", "enterprise", []any{"5.18.0"}},

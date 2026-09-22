@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
-	"strconv"
+
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
 )
 
 // discoveryResponse holds the fields of interest from the Neo4j discovery
@@ -58,20 +58,6 @@ const (
 	minClassicAuraMajor = 5
 	minClassicAuraMinor = 26
 )
-
-// classicAuraVersionPattern matches classic Neo4j versions reported by Aura,
-// e.g. "5.26-aura", "5.27-aura". Aura can report this style even after the
-// calendar-versioning cutover, so it is checked against its own floor
-// (minClassicAuraMajor.minClassicAuraMinor) rather than the calendar floor.
-// Note that a version matching this pattern (e.g. "5.25-aura") can still be
-// rejected by CheckMinimumVersion if it's below the floor — this pattern
-// only recognizes the shape, it doesn't imply acceptance.
-var classicAuraVersionPattern = regexp.MustCompile(`^(\d+)\.(\d+)-aura$`)
-
-// calendarVersionPattern matches calendar-versioned Neo4j releases, e.g.
-// "2026.07", "2026.07.0". The patch component is optional and ignored —
-// the year/month pair alone is sufficient to compare against the floor.
-var calendarVersionPattern = regexp.MustCompile(`^(\d{4})\.(\d{1,2})(?:\.\d+)?$`)
 
 // VersionError is returned by CheckMinimumVersion when the connected Neo4j
 // server's reported version is below the minimum this package requires for
@@ -152,55 +138,14 @@ func EnsureMinimumVersion(ctx context.Context, httpClient *http.Client, baseURL 
 //
 // Returns a *VersionError on any rejection so callers can report the exact
 // reason to the operator.
+//
+// The comparison logic itself lives in database.MeetsMinimumVersion (moved
+// there so internal/readiness can reuse it for the search category's own,
+// different floor) — this function is a thin wrapper that preserves this
+// package's original external contract (a *VersionError, not a bare bool).
 func CheckMinimumVersion(version string) error {
-	// calendarVersionPattern is checked first because it's unambiguous (an
-	// exact 4-digit year) — classicAuraVersionPattern's unanchored \d+ major
-	// would otherwise also match a calendar-shaped string were the "-aura"
-	// suffix ever optional; kept first defensively even though the current
-	// pattern requires the suffix.
-	if m := calendarVersionPattern.FindStringSubmatch(version); m != nil {
-		year, month := atoiMust(m[1]), atoiMust(m[2])
-		if year < minCalendarYear || (year == minCalendarYear && month < minCalendarMonth) {
-			return &VersionError{
-				Got: version,
-				Reason: fmt.Sprintf(
-					"calendar-versioned releases require at least %d.%02d",
-					minCalendarYear, minCalendarMonth,
-				),
-			}
-		}
-		return nil
+	if ok, reason := database.MeetsMinimumVersion(version, minCalendarYear, minCalendarMonth, minClassicAuraMajor, minClassicAuraMinor); !ok {
+		return &VersionError{Got: version, Reason: reason}
 	}
-
-	if m := classicAuraVersionPattern.FindStringSubmatch(version); m != nil {
-		major, minor := atoiMust(m[1]), atoiMust(m[2])
-		if major < minClassicAuraMajor || (major == minClassicAuraMajor && minor < minClassicAuraMinor) {
-			return &VersionError{
-				Got: version,
-				Reason: fmt.Sprintf(
-					"classic Aura versions require at least %d.%d-aura",
-					minClassicAuraMajor, minClassicAuraMinor,
-				),
-			}
-		}
-		return nil
-	}
-
-	return &VersionError{
-		Got:    version,
-		Reason: "unrecognized version format; expected a calendar version (e.g. \"2026.07\") or a classic Aura version (e.g. \"5.26-aura\")",
-	}
-}
-
-// atoiMust parses a regexp-captured all-digit substring. The callers only
-// ever pass groups matched by `\d+`/`\d{4}`/`\d{1,2}` patterns above, so a
-// parse failure here would indicate the regexp itself is broken, not bad
-// input — panicking surfaces that loudly during development/tests rather
-// than silently miscomparing versions.
-func atoiMust(s string) int {
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		panic(fmt.Sprintf("atoiMust: %q is not all-digit despite matching a \\d+ pattern: %v", s, err))
-	}
-	return n
+	return nil
 }

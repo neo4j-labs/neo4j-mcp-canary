@@ -48,18 +48,19 @@ const (
 
 // Neo4jMCPServer represents the MCP server instance
 type Neo4jMCPServer struct {
-	mcpServer          *mcpsdk.Server
-	httpServer         *http.Server
-	HTTPServerReady    chan struct{}
-	shutdownChan       chan struct{}
-	config             *config.Config
-	dbService          database.Service
-	version            string
-	anService          analytics.Service
-	events             *eventing.Emitter
-	gdsInstalled       bool
-	initMu             sync.Mutex
-	connectionVerified atomic.Bool
+	mcpServer              *mcpsdk.Server
+	httpServer             *http.Server
+	HTTPServerReady        chan struct{}
+	shutdownChan           chan struct{}
+	config                 *config.Config
+	dbService              database.Service
+	version                string
+	anService              analytics.Service
+	events                 *eventing.Emitter
+	gdsInstalled           bool
+	searchVersionSupported bool
+	initMu                 sync.Mutex
+	connectionVerified     atomic.Bool
 }
 
 // NewNeo4jMCPServer creates a new MCP server instance
@@ -112,11 +113,12 @@ func (s *Neo4jMCPServer) Start() error {
 		return s.StartHTTPServer()
 	case config.TransportModeStdio:
 		{
-			result, err := readiness.NewChecker(s.dbService).Verify(context.Background())
+			result, err := readiness.NewChecker(s.dbService, s.config.URI).Verify(context.Background())
 			if err != nil {
 				return err
 			}
 			s.gdsInstalled = result.GDSInstalled
+			s.searchVersionSupported = result.SearchVersionSupported
 
 			// Register tools
 			if err := s.registerTools(); err != nil {
@@ -346,15 +348,16 @@ func (s *Neo4jMCPServer) verifyOnFirstRequest(ctx context.Context) {
 	}
 
 	slog.Info("Verify server requirements...")
-	result, err := readiness.NewChecker(s.dbService).Verify(ctx)
+	result, err := readiness.NewChecker(s.dbService, s.config.URI).Verify(ctx)
 	if err != nil {
 		slog.Error("Error during verification", "error", err)
 		return
 	}
 	s.gdsInstalled = result.GDSInstalled
+	s.searchVersionSupported = result.SearchVersionSupported
 
-	if s.gdsInstalled {
-		s.addGDSTools()
+	if s.gdsInstalled || s.searchVersionSupported {
+		s.reregisterOptionalTools()
 	}
 
 	s.events.EmitConnectionInitialized(ctx)
