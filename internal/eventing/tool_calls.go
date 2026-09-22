@@ -24,23 +24,45 @@ func (e *Emitter) OnToolCallComplete(_ context.Context, request *mcpsdk.CallTool
 		success = !result.IsError
 	}
 
-	// Build vector info based on tool type
+	// Build vector info based on tool type. read-cypher/write-cypher/
+	// explain-cypher/profile-cypher all carry a raw "query" argument and can
+	// invoke a vector/fulltext procedure through it (the only way to do so
+	// before the search category existed), so they share the same
+	// string-detection path. The search category's own tools don't need
+	// detection — the tool identity already says what happened — except
+	// create-vector-index/create-fulltext-index, which are index-schema
+	// operations rather than a search/property-set matching these flags'
+	// existing semantics, so they're deliberately left untagged.
 	var vectorInfo *analytics.ToolVectorInfo
 	switch toolName {
-	case "read-cypher", "write-cypher":
+	case "read-cypher", "write-cypher", "explain-cypher", "profile-cypher":
 		vectorInfo = extractCypherVectorInfo(request)
 	case "vector-search":
 		vectorSearchTrue := true
 		vectorInfo = &analytics.ToolVectorInfo{
 			VectorSearch: &vectorSearchTrue,
 		}
+	case "fulltext-search":
+		fullTextSearchTrue := true
+		vectorInfo = &analytics.ToolVectorInfo{
+			FullTextSearch: &fullTextSearchTrue,
+		}
+	case "set-vector-property":
+		vectorPropertySetTrue := true
+		vectorInfo = &analytics.ToolVectorInfo{
+			VectorPropertySet: &vectorPropertySetTrue,
+		}
 	}
 
 	// Emit tool event (connection info sent separately in CONNECTION_INITIALIZED event)
 	e.an.EmitEvent(e.an.NewToolEvent(toolName, success, vectorInfo, e.cfg.OutputFormat))
 
-	// Handle GDS events for cypher tools
-	if toolName == "read-cypher" || toolName == "write-cypher" {
+	// Handle GDS events for cypher tools that actually execute the query.
+	// profile-cypher executes for real (same as write-cypher) so a
+	// gds.graph.project/drop call through it really does create/drop a
+	// projection; explain-cypher never executes at all, so it's excluded —
+	// tagging it would report a projection that was never actually created.
+	if toolName == "read-cypher" || toolName == "write-cypher" || toolName == "profile-cypher" {
 		e.emitGDSEventsIfNeeded(request)
 	}
 }
