@@ -100,8 +100,9 @@ func TestServerInitializationE2E(t *testing.T) {
 		}
 		// update this number when a tool is added or removed.
 		// Readonly tools: get-schema, read-cypher, explain-cypher,
-		// list-constraints-and-indexes, list-gds-procedures, give-feedback
-		assert.Len(t, listToolsResponse.Tools, 6, "read-only mode true returns the wrong number of tools")
+		// list-constraints-and-indexes, list-gds-procedures, give-feedback,
+		// vector-search, fulltext-search
+		assert.Len(t, listToolsResponse.Tools, 8, "read-only mode true returns the wrong number of tools")
 	})
 
 	t.Run("initialization with read-only mode disabled", func(t *testing.T) {
@@ -130,8 +131,9 @@ func TestServerInitializationE2E(t *testing.T) {
 		// All tools: get-schema, read-cypher, write-cypher, explain-cypher,
 		// profile-cypher, list-constraints-and-indexes, create-constraint,
 		// drop-constraint, create-index, drop-index, list-gds-procedures,
-		// give-feedback
-		assert.Len(t, listToolsResponse.Tools, 12, "read-only mode false returns the wrong number of tools")
+		// give-feedback, vector-search, fulltext-search, create-vector-index,
+		// create-fulltext-index, set-vector-property
+		assert.Len(t, listToolsResponse.Tools, 17, "read-only mode false returns the wrong number of tools")
 	})
 	t.Run("initialization with telemetry disabled", func(t *testing.T) {
 		t.Parallel()

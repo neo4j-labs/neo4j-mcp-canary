@@ -135,6 +135,26 @@
     {
       "name": "list-gds-procedures",
       "description": "List GDS procedures available in the instance"
+    },
+    {
+      "name": "vector-search",
+      "description": "Run an approximate nearest-neighbor similarity search against a vector index"
+    },
+    {
+      "name": "fulltext-search",
+      "description": "Run a Lucene-backed full-text search against a fulltext index"
+    },
+    {
+      "name": "create-vector-index",
+      "description": "Create a vector index for similarity search"
+    },
+    {
+      "name": "create-fulltext-index",
+      "description": "Create a fulltext index for text search"
+    },
+    {
+      "name": "set-vector-property",
+      "description": "Set a node or relationship's embedding vector property"
     }
   ],
   "compatibility": {

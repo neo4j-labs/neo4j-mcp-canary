@@ -51,7 +51,7 @@ func TestHTTPPerRequestToolSelection(t *testing.T) {
 	mockDB := db.NewMockService(ctrl)
 	mockDB.EXPECT().VerifyConnectivity(gomock.Any()).AnyTimes()
 	mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).AnyTimes().Return(gdsVersionRecord("2.22.0"), nil)
-	mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).AnyTimes()
+	mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).AnyTimes().Return(qualifyingSearchVersionRecord(), nil)
 
 	s, errChan := createHTTPServer(t, cfg, mockDB, analyticsService)
 	defer assertNoCloseOrStopError(t, s, errChan)
@@ -73,7 +73,7 @@ func TestHTTPPerRequestToolSelection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ListTools: %v", err)
 		}
-		assert.Len(t, res.Tools, 12)
+		assert.Len(t, res.Tools, 17)
 	})
 
 	t.Run("X-MCP-Tools narrows tools/list and rejects excluded tools/call", func(t *testing.T) {

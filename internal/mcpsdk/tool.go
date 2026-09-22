@@ -119,6 +119,16 @@ func WithArray(name, itemType string, opts ...PropertyOption) ToolOption {
 	}
 }
 
+// WithInteger declares an "integer"-typed input property.
+func WithInteger(name string, opts ...PropertyOption) ToolOption {
+	return func(t *Tool) { addProperty(t, name, "integer", nil, opts) }
+}
+
+// WithBoolean declares a "boolean"-typed input property.
+func WithBoolean(name string, opts ...PropertyOption) ToolOption {
+	return func(t *Tool) { addProperty(t, name, "boolean", nil, opts) }
+}
+
 func addProperty(t *Tool, name, schemaType string, items *jsonschema.Schema, opts []PropertyOption) {
 	b := &propertyBuilder{schema: &jsonschema.Schema{Type: schemaType, Items: items}}
 	for _, opt := range opts {

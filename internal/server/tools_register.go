@@ -13,6 +13,7 @@ import (
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/cypher"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/feedback"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/gds"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/search"
 )
 
 // registerTools registers all enabled MCP tools and adds them to the provided MCP server.
@@ -50,7 +51,13 @@ func (d ToolDefinition) Label() string {
 	return d.definition.Tool.Name
 }
 
-func (s *Neo4jMCPServer) addGDSTools() {
+// reregisterOptionalTools re-runs the tool filter pipeline and re-adds
+// every currently-enabled tool. Used after a readiness capability (GDS
+// installed, or the server version now clearing the search category's
+// floor) is newly confirmed available on the HTTP lazy-verification path —
+// see verifyOnFirstRequest in server.go. mcpsdk.Server.AddTools replaces by
+// name, so this is safe to call even when nothing newly qualified.
+func (s *Neo4jMCPServer) reregisterOptionalTools() {
 	filteredTools := s.getEnabledTools()
 	s.mcpServer.AddTools(filteredTools...)
 }
@@ -70,6 +77,12 @@ func (s *Neo4jMCPServer) getEnabledTools() []mcpsdk.ServerTool {
 	// If GDS is not installed, disable GDS tools.
 	if !s.gdsInstalled {
 		filters = append(filters, filterGDSTools)
+	}
+	// If the connected server doesn't clear the search category's version
+	// floor (its SEARCH-clause syntax won't parse below it), disable search
+	// tools.
+	if !s.searchVersionSupported {
+		filters = append(filters, filterSearchTools)
 	}
 
 	deps := s.buildToolDependencies()
@@ -156,6 +169,16 @@ func filterGDSTools(defs []ToolDefinition) []ToolDefinition {
 		}
 	}
 	return nonGDSTools
+}
+
+func filterSearchTools(defs []ToolDefinition) []ToolDefinition {
+	nonSearchTools := make([]ToolDefinition, 0, len(defs))
+	for _, t := range defs {
+		if t.Category != tools.CategorySearch {
+			nonSearchTools = append(nonSearchTools, t)
+		}
+	}
+	return nonSearchTools
 }
 
 // buildToolDependencies creates a ToolDependencies with all config wired through.
@@ -280,6 +303,52 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 				Handler: feedback.GiveFeedbackHandler(deps),
 			},
 			readonly: true,
+		},
+		// Search Category/Section — gated behind s.searchVersionSupported via
+		// filterSearchTools (see getEnabledTools below); the connected server
+		// must clear the search category's own version floor (calendar
+		// >= 2026.09.0 or classic-Aura >= 5.27-aura) for these tools to
+		// register at all, since their SEARCH-clause syntax won't parse
+		// below it.
+		{
+			Category: tools.CategorySearch,
+			definition: mcpsdk.ServerTool{
+				Tool:    search.VectorSearchSpec(),
+				Handler: search.VectorSearchHandler(deps),
+			},
+			readonly: true,
+		},
+		{
+			Category: tools.CategorySearch,
+			definition: mcpsdk.ServerTool{
+				Tool:    search.FullTextSearchSpec(),
+				Handler: search.FullTextSearchHandler(deps),
+			},
+			readonly: true,
+		},
+		{
+			Category: tools.CategorySearch,
+			definition: mcpsdk.ServerTool{
+				Tool:    search.CreateVectorIndexSpec(),
+				Handler: search.CreateVectorIndexHandler(deps),
+			},
+			readonly: false,
+		},
+		{
+			Category: tools.CategorySearch,
+			definition: mcpsdk.ServerTool{
+				Tool:    search.CreateFullTextIndexSpec(),
+				Handler: search.CreateFullTextIndexHandler(deps),
+			},
+			readonly: false,
+		},
+		{
+			Category: tools.CategorySearch,
+			definition: mcpsdk.ServerTool{
+				Tool:    search.SetVectorPropertySpec(),
+				Handler: search.SetVectorPropertyHandler(deps),
+			},
+			readonly: false,
 		},
 		// Add other categories below...
 	}

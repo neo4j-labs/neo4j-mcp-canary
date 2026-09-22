@@ -6,6 +6,7 @@ package queryapi
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -53,4 +54,18 @@ func DetectMode(uri string) (Mode, error) {
 	default:
 		return ModeBolt, nil
 	}
+}
+
+// auraHostPattern matches an Aura-managed host — databases.neo4j.io (single
+// database) or instances.neo4j.io (multi-database) — duplicated from
+// internal/analytics's own private isAura rather than shared: that copy
+// exists for telemetry tagging, this one for version-gate normalization
+// (internal/readiness.Checker.Verify), two unrelated call sites for a
+// one-line regex.
+var auraHostPattern = regexp.MustCompile(`(databases|instances)\.neo4j\.io\b`)
+
+// IsAuraHost reports whether uri points at an Aura-managed instance, as
+// opposed to a self-managed one. A pure string check, no network access.
+func IsAuraHost(uri string) bool {
+	return auraHostPattern.MatchString(uri)
 }

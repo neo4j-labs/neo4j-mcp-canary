@@ -11,11 +11,12 @@ const (
 	CategoryCypher   Category = "cypher"
 	CategoryGDS      Category = "gds"
 	CategoryFeedback Category = "feedback"
+	CategorySearch   Category = "search"
 )
 
 // AllCategories returns every known category, in declaration order. It is
 // the single source of truth used to validate category names supplied via
 // configuration or an HTTP request header.
 func AllCategories() []Category {
-	return []Category{CategoryCypher, CategoryGDS, CategoryFeedback}
+	return []Category{CategoryCypher, CategoryGDS, CategoryFeedback, CategorySearch}
 }
