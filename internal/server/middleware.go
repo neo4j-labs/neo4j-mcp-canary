@@ -5,6 +5,8 @@ package server
 
 import (
 	"bytes"
+	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/auth"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 )
 
 const (
@@ -67,6 +70,113 @@ func (s *Neo4jMCPServer) chainMiddleware(allowedOrigins []string, next http.Hand
 	handler = pathValidationMiddleware()(handler)
 
 	return handler
+}
+
+// chainMiddlewareForInstance builds the middleware chain for one
+// multi-instance route ("/<name>/mcp" — see buildMultiInstanceHandler in
+// server.go). It mirrors chainMiddleware's CORS/tool-selection/logging
+// wrapping, but swaps the generic authMiddleware for instanceAuthMiddleware
+// (which branches on this specific instance's auth.Type) and needs no
+// pathValidationMiddleware — the mux already scoped this handler to exactly
+// this instance's path, so an unconfigured path segment 404s before ever
+// reaching a middleware chain at all.
+func (s *Neo4jMCPServer) chainMiddlewareForInstance(inst config.NeoInstance, allowedOrigins []string, next http.Handler) http.Handler {
+	handler := next
+	handler = loggingMiddleware()(handler)
+	handler = instanceAuthMiddleware(inst.Name, inst.Auth, s.config.HTTPAPIKeyHeaderName, s.bearerVerifier)(handler)
+	handler = toolSelectionMiddleware(s.config.HTTPToolsHeaderName, s.config.HTTPToolCategoriesHeaderName)(handler)
+	handler = corsMiddleware(allowedOrigins, s.config.AuthHeaderName, s.config.HTTPToolsHeaderName, s.config.HTTPToolCategoriesHeaderName)(handler)
+	return handler
+}
+
+// BearerVerifyFunc verifies a client-presented Bearer token for a
+// bearer-type multi-instance route against that instance's configured
+// identity provider (issuer/jwks_uri/audience — see config.InstanceAuth). A
+// non-nil error means the token is missing, malformed, expired, or doesn't
+// match the configured issuer/audience/signature.
+type BearerVerifyFunc func(ctx context.Context, instanceAuth config.InstanceAuth, token string) error
+
+// instanceAuthMiddleware enforces authentication for one multi-instance
+// route, branching on that instance's auth.Type:
+//   - basic: the client must present a matching key in apiKeyHeaderName —
+//     the instance's actual Neo4j credentials are the static service
+//     account already baked into its driver (see cmd/neo4j-mcp/main.go),
+//     never anything the client sends.
+//   - basic_passthrough: the client's own HTTP Basic credentials are
+//     required and forwarded to Neo4j as-is, exactly like today's
+//     single-instance HTTP mode.
+//   - bearer: the client's Bearer token is verified via verifyBearer before
+//     being forwarded to Neo4j. If verifyBearer is nil (bearer verification
+//     not yet wired up — see Neo4jMCPServer.SetBearerVerifier), every
+//     request to a bearer-type instance is rejected with 501 rather than
+//     silently skipping verification.
+//
+// Unlike authMiddleware, this has no unauthenticated-method allowlist:
+// multi-instance mode exists specifically to require the client to
+// authenticate to this server (closing the gap a static per-instance
+// service account would otherwise leave), so every request on every
+// instance route needs valid auth, with no ping/tools-list exception.
+func instanceAuthMiddleware(instanceName string, instAuth config.InstanceAuth, apiKeyHeaderName string, verifyBearer BearerVerifyFunc) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := auth.WithInstanceSelection(r.Context(), instanceName)
+
+			switch instAuth.Type {
+			case config.InstanceAuthBasic:
+				presented := r.Header.Get(apiKeyHeaderName)
+				if presented == "" || !matchesAnyAPIKey(presented, instAuth.APIKeys) {
+					http.Error(w, "Unauthorized: invalid or missing API key", http.StatusUnauthorized)
+					return
+				}
+				next.ServeHTTP(w, r.WithContext(ctx))
+
+			case config.InstanceAuthBasicPassthrough:
+				user, pass, ok := r.BasicAuth()
+				if !ok || user == "" || pass == "" {
+					w.Header().Set("WWW-Authenticate", `Basic realm="Neo4j MCP Server"`)
+					http.Error(w, "Unauthorized: Basic authentication required", http.StatusUnauthorized)
+					return
+				}
+				next.ServeHTTP(w, r.WithContext(auth.WithBasicAuth(ctx, user, pass)))
+
+			case config.InstanceAuthBearer:
+				token, found := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+				token = strings.TrimSpace(token)
+				if !found || token == "" {
+					w.Header().Set("WWW-Authenticate", `Bearer realm="Neo4j MCP Server"`)
+					http.Error(w, "Unauthorized: Bearer token required", http.StatusUnauthorized)
+					return
+				}
+				if verifyBearer == nil {
+					http.Error(w, "Bearer verification is not yet configured for this instance", http.StatusNotImplemented)
+					return
+				}
+				if err := verifyBearer(r.Context(), instAuth, token); err != nil {
+					w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
+					http.Error(w, "Unauthorized: invalid bearer token", http.StatusUnauthorized)
+					return
+				}
+				next.ServeHTTP(w, r.WithContext(auth.WithBearerToken(ctx, token)))
+
+			default:
+				// Unreachable in practice: config.ValidateInstances rejects any
+				// other Type before the server ever starts.
+				http.Error(w, "Internal Server Error: unknown instance auth type", http.StatusInternalServerError)
+			}
+		})
+	}
+}
+
+// matchesAnyAPIKey reports whether presented equals any of configured,
+// comparing in constant time so a mismatching key doesn't leak timing
+// information about how many leading bytes matched.
+func matchesAnyAPIKey(presented string, configured []string) bool {
+	for _, k := range configured {
+		if subtle.ConstantTimeCompare([]byte(presented), []byte(k)) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // authMiddleware enforces HTTP authentication (Bearer token or Basic Auth) for all requests in HTTP mode.

@@ -5,6 +5,8 @@ package server
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -789,4 +791,257 @@ func TestAuthMiddleware_AllowsUnauthenticatedNotificationsInitialize(t *testing.
 	if rec.Code != http.StatusOK {
 		t.Fatalf("Expected 200 OK for unauthenticated initialize, got %d", rec.Code)
 	}
+}
+
+// instanceSelectionCheckHandler verifies the expected instance name landed
+// in context via auth.WithInstanceSelection.
+func instanceSelectionCheckHandler(t *testing.T, expectedName string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name, ok := auth.GetInstanceSelection(r.Context())
+		if !ok {
+			t.Error("Expected instance selection in context, but none found")
+		}
+		if name != expectedName {
+			t.Errorf("Expected instance name %q, got %q", expectedName, name)
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+}
+
+func TestInstanceAuthMiddleware_Basic(t *testing.T) {
+	instAuth := config.InstanceAuth{Type: config.InstanceAuthBasic, APIKeys: []string{"good-key"}}
+
+	t.Run("valid API key is accepted and instance selection is set", func(t *testing.T) {
+		handler := instanceAuthMiddleware("prod", instAuth, "X-Api-Key", nil)(instanceSelectionCheckHandler(t, "prod"))
+
+		req := httptest.NewRequest("POST", "/prod/mcp", nil)
+		req.Header.Set("X-Api-Key", "good-key")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", rec.Code)
+		}
+	})
+
+	t.Run("missing API key is rejected", func(t *testing.T) {
+		handler := instanceAuthMiddleware("prod", instAuth, "X-Api-Key", nil)(mockHandler())
+
+		req := httptest.NewRequest("POST", "/prod/mcp", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("Expected status 401, got %d", rec.Code)
+		}
+	})
+
+	t.Run("wrong API key is rejected", func(t *testing.T) {
+		handler := instanceAuthMiddleware("prod", instAuth, "X-Api-Key", nil)(mockHandler())
+
+		req := httptest.NewRequest("POST", "/prod/mcp", nil)
+		req.Header.Set("X-Api-Key", "wrong-key")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("Expected status 401, got %d", rec.Code)
+		}
+	})
+
+	t.Run("a different instance's API key is rejected", func(t *testing.T) {
+		handler := instanceAuthMiddleware("prod", instAuth, "X-Api-Key", nil)(mockHandler())
+
+		req := httptest.NewRequest("POST", "/prod/mcp", nil)
+		req.Header.Set("X-Api-Key", "some-other-instances-key")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("Expected status 401, got %d", rec.Code)
+		}
+	})
+}
+
+func TestInstanceAuthMiddleware_BasicPassthrough(t *testing.T) {
+	instAuth := config.InstanceAuth{Type: config.InstanceAuthBasicPassthrough}
+
+	t.Run("valid basic credentials are forwarded and instance selection is set", func(t *testing.T) {
+		handler := instanceAuthMiddleware("staging", instAuth, "X-Api-Key", nil)(authCheckHandler(t, true, "user", "pass"))
+
+		req := httptest.NewRequest("POST", "/staging/mcp", nil)
+		req.SetBasicAuth("user", "pass")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", rec.Code)
+		}
+	})
+
+	t.Run("missing basic credentials are rejected", func(t *testing.T) {
+		handler := instanceAuthMiddleware("staging", instAuth, "X-Api-Key", nil)(mockHandler())
+
+		req := httptest.NewRequest("POST", "/staging/mcp", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("Expected status 401, got %d", rec.Code)
+		}
+	})
+}
+
+func TestInstanceAuthMiddleware_Bearer(t *testing.T) {
+	instAuth := config.InstanceAuth{
+		Type: config.InstanceAuthBearer, Issuer: "https://idp.example.com/", JWKSURI: "https://idp.example.com/jwks.json", Audience: "api://neo4j-mcp",
+	}
+
+	t.Run("missing bearer token is rejected", func(t *testing.T) {
+		handler := instanceAuthMiddleware("analytics", instAuth, "X-Api-Key", nil)(mockHandler())
+
+		req := httptest.NewRequest("POST", "/analytics/mcp", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("Expected status 401, got %d", rec.Code)
+		}
+	})
+
+	t.Run("no verifier configured yet returns 501, not a silent pass", func(t *testing.T) {
+		handler := instanceAuthMiddleware("analytics", instAuth, "X-Api-Key", nil)(mockHandler())
+
+		req := httptest.NewRequest("POST", "/analytics/mcp", nil)
+		req.Header.Set("Authorization", "Bearer some-token")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotImplemented {
+			t.Errorf("Expected status 501, got %d", rec.Code)
+		}
+	})
+
+	t.Run("verifier rejecting the token returns 401", func(t *testing.T) {
+		verifier := func(_ context.Context, _ config.InstanceAuth, _ string) error {
+			return errors.New("invalid signature")
+		}
+		handler := instanceAuthMiddleware("analytics", instAuth, "X-Api-Key", verifier)(mockHandler())
+
+		req := httptest.NewRequest("POST", "/analytics/mcp", nil)
+		req.Header.Set("Authorization", "Bearer bad-token")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("Expected status 401, got %d", rec.Code)
+		}
+	})
+
+	t.Run("verifier accepting the token forwards it and sets instance selection", func(t *testing.T) {
+		verifier := func(_ context.Context, a config.InstanceAuth, token string) error {
+			if a.Issuer != instAuth.Issuer || token != "good-token" {
+				t.Errorf("verifier received unexpected auth=%+v token=%q", a, token)
+			}
+			return nil
+		}
+		handler := instanceAuthMiddleware("analytics", instAuth, "X-Api-Key", verifier)(bearerTokenCheckHandler(t, true, "good-token"))
+
+		req := httptest.NewRequest("POST", "/analytics/mcp", nil)
+		req.Header.Set("Authorization", "Bearer good-token")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", rec.Code)
+		}
+	})
+}
+
+func TestMatchesAnyAPIKey(t *testing.T) {
+	configured := []string{"key-a", "key-b"}
+
+	if !matchesAnyAPIKey("key-a", configured) {
+		t.Error("expected key-a to match")
+	}
+	if !matchesAnyAPIKey("key-b", configured) {
+		t.Error("expected key-b to match")
+	}
+	if matchesAnyAPIKey("key-c", configured) {
+		t.Error("expected key-c not to match")
+	}
+	if matchesAnyAPIKey("", configured) {
+		t.Error("expected empty string not to match")
+	}
+	if matchesAnyAPIKey("key-a", nil) {
+		t.Error("expected no match against an empty configured list")
+	}
+}
+
+func TestBuildMultiInstanceHandler_RoutesByPath(t *testing.T) {
+	mockServer := mockNeo4jMCPServer(t)
+	mockServer.config.HTTPAPIKeyHeaderName = "X-Api-Key"
+	mockServer.config.Instances = []config.NeoInstance{
+		{Name: "prod", URI: "neo4j://prod:7687", Auth: config.InstanceAuth{Type: config.InstanceAuthBasic, APIKeys: []string{"prod-key"}}},
+		{Name: "staging", URI: "neo4j://staging:7687", Auth: config.InstanceAuth{Type: config.InstanceAuthBasic, APIKeys: []string{"staging-key"}}},
+	}
+
+	// Echoes the resolved instance name in the response body, so each
+	// sub-test below can assert which instance's route it actually reached.
+	echoInstanceHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name, _ := auth.GetInstanceSelection(r.Context())
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(name))
+	})
+
+	handler := mockServer.buildMultiInstanceHandler(nil, echoInstanceHandler)
+
+	t.Run("routes /prod/mcp to the prod instance", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/prod/mcp", nil)
+		req.Header.Set("X-Api-Key", "prod-key")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d", rec.Code)
+		}
+		if rec.Body.String() != "prod" {
+			t.Errorf("Expected response body %q, got %q", "prod", rec.Body.String())
+		}
+	})
+
+	t.Run("routes /staging/mcp to the staging instance", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/staging/mcp", nil)
+		req.Header.Set("X-Api-Key", "staging-key")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d", rec.Code)
+		}
+		if rec.Body.String() != "staging" {
+			t.Errorf("Expected response body %q, got %q", "staging", rec.Body.String())
+		}
+	})
+
+	t.Run("prod's API key is rejected against staging's route", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/staging/mcp", nil)
+		req.Header.Set("X-Api-Key", "prod-key")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("Expected status 401, got %d", rec.Code)
+		}
+	})
+
+	t.Run("an unconfigured instance path 404s", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/does-not-exist/mcp", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("Expected status 404, got %d", rec.Code)
+		}
+	})
 }

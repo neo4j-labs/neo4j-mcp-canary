@@ -61,6 +61,21 @@ type Neo4jMCPServer struct {
 	searchVersionSupported bool
 	initMu                 sync.Mutex
 	connectionVerified     atomic.Bool
+	// bearerVerifier verifies a client-presented Bearer token for a
+	// bearer-type multi-instance route (issuer/audience/signature/expiry
+	// against that instance's configured JWKS). Set via SetBearerVerifier
+	// once the caller has one to offer; nil means bearer-type instances
+	// reject every request with 501, which is the case until that wiring
+	// lands.
+	bearerVerifier BearerVerifyFunc
+}
+
+// SetBearerVerifier installs the verifier multi-instance bearer-type routes
+// use to validate an incoming client token before forwarding it to Neo4j.
+// Must be called before Start if any configured instance has auth.type
+// "bearer" — see the bearerVerifier field.
+func (s *Neo4jMCPServer) SetBearerVerifier(verifier BearerVerifyFunc) {
+	s.bearerVerifier = verifier
 }
 
 // NewNeo4jMCPServer creates a new MCP server instance
@@ -217,15 +232,27 @@ func (s *Neo4jMCPServer) StartHTTPServer() error {
 	}
 	slog.Info("Starting HTTP server", "address", addr, "url", fmt.Sprintf("%s://%s", protocol, addr), "tls", s.config.HTTPTLSEnabled)
 
-	// Create the streamable-HTTP handler. Path routing (mounting it at /mcp)
-	// is handled by pathValidationMiddleware in the middleware chain below.
+	// Create the streamable-HTTP handler. It's shared across every route below
+	// (single-instance or multi-instance): the MCP tool set is identical either
+	// way, only the Neo4j instance a call ends up hitting differs, and that's
+	// resolved from context (auth.GetInstanceSelection) inside the handler chain,
+	// not by handing the SDK a different tool registration per instance.
 	mcpServerHTTP := s.mcpServer.HTTPHandler(mcpsdk.HTTPOptions{Stateless: true})
-
 	allowedOrigins := parseAllowedOrigins(s.config.HTTPAllowedOrigins)
+
+	var handler http.Handler
+	if len(s.config.Instances) > 0 {
+		handler = s.buildMultiInstanceHandler(allowedOrigins, mcpServerHTTP)
+	} else {
+		// Path routing (mounting it at /mcp) is handled by
+		// pathValidationMiddleware in the middleware chain below.
+		handler = s.chainMiddleware(allowedOrigins, mcpServerHTTP)
+	}
+
 	// Wrap handler with middleware and create HTTP server
 	s.httpServer = &http.Server{
 		Addr:    addr,
-		Handler: s.chainMiddleware(allowedOrigins, mcpServerHTTP),
+		Handler: handler,
 		// Timeouts optimized for stateless HTTP MCP requests
 		ReadTimeout:       serverHTTPReadTimeout,
 		WriteTimeout:      serverHTTPWriteTimeout,
@@ -286,6 +313,25 @@ func (s *Neo4jMCPServer) StartHTTPServer() error {
 		// Server was stopped via Stop() method
 		return nil
 	}
+}
+
+// buildMultiInstanceHandler registers one route per configured Neo4j
+// instance ("/<name>/mcp") on a shared mux, rather than the single fixed
+// "/mcp" registration single-instance mode uses. Each route gets its own
+// middleware chain (chainMiddlewareForInstance) that stamps that instance's
+// name into context and enforces that instance's own auth.Type before
+// reaching the shared SDK handler. An unconfigured path segment is simply
+// unmatched by the mux and 404s for free — instance names are already
+// validated as safe, unambiguous URL path segments in
+// config.ValidateInstances.
+func (s *Neo4jMCPServer) buildMultiInstanceHandler(allowedOrigins []string, mcpServerHTTP http.Handler) http.Handler {
+	mux := http.NewServeMux()
+	for _, inst := range s.config.Instances {
+		routeHandler := s.chainMiddlewareForInstance(inst, allowedOrigins, mcpServerHTTP)
+		mux.Handle("/"+inst.Name+"/mcp", routeHandler)
+		mux.Handle("/"+inst.Name+"/mcp/", routeHandler)
+	}
+	return mux
 }
 
 // configureHooks sets up MCP SDK hooks for tool call tracking
