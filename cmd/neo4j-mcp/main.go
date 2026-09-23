@@ -16,6 +16,7 @@ import (
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/logger"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/oidc"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/queryapi"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/server"
 
@@ -49,10 +50,17 @@ func main() {
 
 	ctx := context.Background()
 
-	// initDatabaseService returns errors rather than calling os.Exit itself so
-	// that main() is the only place that decides to exit — see its doc
-	// comment for why that matters once a defer is in the picture.
-	dbService, cleanup, err := initDatabaseService(ctx, cfg)
+	// initDatabaseService/initMultiInstanceDatabaseService return errors
+	// rather than calling os.Exit themselves so that main() is the only
+	// place that decides to exit — see initDatabaseService's doc comment
+	// for why that matters once a defer is in the picture.
+	var dbService database.Service
+	var cleanup func()
+	if len(cfg.Instances) > 0 {
+		dbService, cleanup, err = initMultiInstanceDatabaseService(ctx, cfg)
+	} else {
+		dbService, cleanup, err = initDatabaseService(ctx, cfg)
+	}
 	if err != nil {
 		slog.Error("Failed to initialize connection to Neo4j", "error", err)
 		os.Exit(1)
@@ -73,6 +81,19 @@ func main() {
 
 	// Create and configure the MCP server
 	mcpServer := server.NewNeo4jMCPServer(Version, cfg, dbService, anService)
+
+	// In multi-instance mode, wire up Bearer-token verification for any
+	// bearer-type instances. NewVerifierRegistry is a no-op (an empty
+	// registry) when there are none, so this is always safe to call rather
+	// than needing its own conditional.
+	if len(cfg.Instances) > 0 {
+		verifiers, err := oidc.NewVerifierRegistry(ctx, cfg.Instances)
+		if err != nil {
+			slog.Error("Failed to initialize Bearer token verification", "error", err)
+			os.Exit(1)
+		}
+		mcpServer.SetBearerVerifier(verifiers.VerifyBearer)
+	}
 
 	// Start the server - this blocks until shutdown for both stdio and HTTP modes
 	if err := mcpServer.Start(); err != nil {
@@ -132,6 +153,80 @@ func initDatabaseService(ctx context.Context, cfg *config.Config) (database.Serv
 		}
 	}
 	return dbService, cleanup, nil
+}
+
+// initMultiInstanceDatabaseService builds one Neo4j Bolt driver per
+// configured instance (Config.Instances) and wraps them in a
+// database.InstanceRegistry, so the single dbService handed to every tool
+// handler transparently dispatches to whichever instance a request
+// selected (internal/auth.WithInstanceSelection, set by that instance's
+// own HTTP route — see internal/server.buildMultiInstanceHandler). Only
+// Bolt-scheme instance URIs are supported here; a Query API instance URI
+// (http/https) is rejected with a clear startup error rather than silently
+// misbehaving — Query API-backed multi-instance isn't implemented yet.
+//
+// Each instance's auth.Type determines its driver's own credentials and
+// whether per-call context auth is used, mirroring the single-instance
+// branching in initDatabaseService:
+//   - basic: a static service-account credential is baked into the driver;
+//     perRequestAuth is false since there is nothing per-call to look at —
+//     the client authenticates to this server with an API key, not Neo4j
+//     credentials (see internal/server.instanceAuthMiddleware).
+//   - basic_passthrough / bearer: the driver gets no fixed credentials
+//     (the zero-value neo4j.AuthToken, exactly like today's single-instance
+//     HTTP mode below); perRequestAuth is true, since instanceAuthMiddleware
+//     puts the client's forwarded Basic credentials or verified Bearer
+//     token on the request context for every call.
+//
+// Like initDatabaseService, this returns errors instead of calling os.Exit
+// itself, and the returned cleanup func must be deferred by the caller only
+// once this has already returned successfully.
+func initMultiInstanceDatabaseService(ctx context.Context, cfg *config.Config) (database.Service, func(), error) {
+	services := make(map[string]database.Service, len(cfg.Instances))
+	var drivers []neo4j.Driver
+
+	closeDrivers := func() {
+		for _, d := range drivers {
+			if err := d.Close(ctx); err != nil {
+				slog.Error("Error closing driver", "error", err)
+			}
+		}
+	}
+
+	for _, inst := range cfg.Instances {
+		connMode, err := queryapi.DetectMode(inst.URI)
+		if err != nil {
+			closeDrivers()
+			return nil, nil, fmt.Errorf("instance %q: failed to parse Neo4j URI: %w", inst.Name, err)
+		}
+		if connMode == queryapi.ModeQueryAPI {
+			closeDrivers()
+			return nil, nil, fmt.Errorf("instance %q: Query API URIs are not supported in multi-instance mode yet", inst.Name)
+		}
+
+		var authToken neo4j.AuthToken
+		perRequestAuth := true
+		if inst.Auth.Type == config.InstanceAuthBasic {
+			authToken = neo4j.BasicAuth(inst.Auth.Username, inst.Auth.Password, "")
+			perRequestAuth = false
+		}
+
+		driver, err := neo4j.NewDriver(inst.URI, authToken)
+		if err != nil {
+			closeDrivers()
+			return nil, nil, fmt.Errorf("instance %q: failed to create neo4j driver: %w", inst.Name, err)
+		}
+		drivers = append(drivers, driver)
+
+		dbService, err := database.NewNeo4jServiceWithAuthMode(driver, inst.Database, perRequestAuth, Version)
+		if err != nil {
+			closeDrivers()
+			return nil, nil, fmt.Errorf("instance %q: failed to create database service: %w", inst.Name, err)
+		}
+		services[inst.Name] = dbService
+	}
+
+	return database.NewInstanceRegistry(services), closeDrivers, nil
 }
 
 // newService builds a database.Service backed by the Neo4j Query
