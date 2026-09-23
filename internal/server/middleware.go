@@ -9,6 +9,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -83,10 +84,20 @@ func (s *Neo4jMCPServer) chainMiddleware(allowedOrigins []string, next http.Hand
 func (s *Neo4jMCPServer) chainMiddlewareForInstance(inst config.NeoInstance, allowedOrigins []string, next http.Handler) http.Handler {
 	handler := next
 	handler = loggingMiddleware()(handler)
-	handler = instanceAuthMiddleware(inst.Name, inst.Auth, s.config.HTTPAPIKeyHeaderName, s.bearerVerifier)(handler)
+	handler = instanceAuthMiddleware(inst.Name, inst.Auth, s.config.HTTPAPIKeyHeaderName, s.scheme(), s.bearerVerifier)(handler)
 	handler = toolSelectionMiddleware(s.config.HTTPToolsHeaderName, s.config.HTTPToolCategoriesHeaderName)(handler)
 	handler = corsMiddleware(allowedOrigins, s.config.AuthHeaderName, s.config.HTTPToolsHeaderName, s.config.HTTPToolCategoriesHeaderName)(handler)
 	return handler
+}
+
+// scheme reports the URL scheme this server is externally reachable on,
+// for building absolute URLs (RFC 9728 resource/metadata URLs) from a
+// request's Host header.
+func (s *Neo4jMCPServer) scheme() string {
+	if s.config.HTTPTLSEnabled {
+		return protocolHTTPS
+	}
+	return protocolHTTP
 }
 
 // BearerVerifyFunc verifies a client-presented Bearer token for a
@@ -116,7 +127,7 @@ type BearerVerifyFunc func(ctx context.Context, instanceAuth config.InstanceAuth
 // authenticate to this server (closing the gap a static per-instance
 // service account would otherwise leave), so every request on every
 // instance route needs valid auth, with no ping/tools-list exception.
-func instanceAuthMiddleware(instanceName string, instAuth config.InstanceAuth, apiKeyHeaderName string, verifyBearer BearerVerifyFunc) func(http.Handler) http.Handler {
+func instanceAuthMiddleware(instanceName string, instAuth config.InstanceAuth, apiKeyHeaderName, scheme string, verifyBearer BearerVerifyFunc) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := auth.WithInstanceSelection(r.Context(), instanceName)
@@ -140,10 +151,16 @@ func instanceAuthMiddleware(instanceName string, instAuth config.InstanceAuth, a
 				next.ServeHTTP(w, r.WithContext(auth.WithBasicAuth(ctx, user, pass)))
 
 			case config.InstanceAuthBearer:
+				// resource_metadata (RFC 9728 §5.1) tells a spec-compliant MCP
+				// client where to fetch this instance's own protected-resource
+				// metadata document — naming the identity provider it should
+				// log in with — before it ever presents a token here.
+				meta := metadataURL(scheme, r, instanceName)
+
 				token, found := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 				token = strings.TrimSpace(token)
 				if !found || token == "" {
-					w.Header().Set("WWW-Authenticate", `Bearer realm="Neo4j MCP Server"`)
+					w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata=%q`, meta))
 					http.Error(w, "Unauthorized: Bearer token required", http.StatusUnauthorized)
 					return
 				}
@@ -152,7 +169,7 @@ func instanceAuthMiddleware(instanceName string, instAuth config.InstanceAuth, a
 					return
 				}
 				if err := verifyBearer(r.Context(), instAuth, token); err != nil {
-					w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
+					w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer error="invalid_token", resource_metadata=%q`, meta))
 					http.Error(w, "Unauthorized: invalid bearer token", http.StatusUnauthorized)
 					return
 				}
@@ -165,6 +182,56 @@ func instanceAuthMiddleware(instanceName string, instAuth config.InstanceAuth, a
 			}
 		})
 	}
+}
+
+// protectedResourceMetadataPath is the RFC 9728 well-known path for one
+// instance's own protected-resource metadata document: the well-known
+// segment inserted before the resource's own path
+// ("/<name>/mcp" -> "/.well-known/oauth-protected-resource/<name>/mcp").
+// Because instance selection is part of the URL path rather than a shared
+// header, each bearer-type instance gets its own metadata document naming
+// exactly its own issuer — a header-based design would have had to name
+// every configured issuer in one shared document instead.
+func protectedResourceMetadataPath(instanceName string) string {
+	return "/.well-known/oauth-protected-resource/" + instanceName + "/mcp"
+}
+
+// resourceURL and metadataURL build absolute URLs from the incoming
+// request's Host header (rather than from a startup-computed HTTPHost/
+// HTTPPort) so they resolve correctly behind a reverse proxy or load
+// balancer that terminates a different host/port than this process binds
+// to. scheme reflects this server's own TLS configuration (see
+// Neo4jMCPServer.scheme), not any proxy-forwarded scheme.
+func resourceURL(scheme string, r *http.Request, instanceName string) string {
+	return fmt.Sprintf("%s://%s/%s/mcp", scheme, r.Host, instanceName)
+}
+
+func metadataURL(scheme string, r *http.Request, instanceName string) string {
+	return fmt.Sprintf("%s://%s%s", scheme, r.Host, protectedResourceMetadataPath(instanceName))
+}
+
+// protectedResourceMetadataDocument is the RFC 9728 §3.1 document shape,
+// scoped to exactly what a bearer-type instance needs to advertise: this
+// server's own resource identity and the single identity provider it
+// trusts for that instance.
+type protectedResourceMetadataDocument struct {
+	Resource             string   `json:"resource"`
+	AuthorizationServers []string `json:"authorization_servers"`
+}
+
+// protectedResourceMetadataHandler serves the metadata document for one
+// bearer-type instance, so a spec-compliant MCP client can discover which
+// identity provider to log in with (per the MCP Authorization spec) before
+// it ever presents a token to this server.
+func protectedResourceMetadataHandler(scheme, instanceName, issuer string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		doc := protectedResourceMetadataDocument{
+			Resource:             resourceURL(scheme, r, instanceName),
+			AuthorizationServers: []string{issuer},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(doc)
+	})
 }
 
 // matchesAnyAPIKey reports whether presented equals any of configured,

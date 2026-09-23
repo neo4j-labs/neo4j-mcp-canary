@@ -330,6 +330,12 @@ func (s *Neo4jMCPServer) buildMultiInstanceHandler(allowedOrigins []string, mcpS
 		routeHandler := s.chainMiddlewareForInstance(inst, allowedOrigins, mcpServerHTTP)
 		mux.Handle("/"+inst.Name+"/mcp", routeHandler)
 		mux.Handle("/"+inst.Name+"/mcp/", routeHandler)
+
+		// Only bearer-type instances have an identity provider to advertise —
+		// basic/basic_passthrough instances have no RFC 9728 story at all.
+		if inst.Auth.Type == config.InstanceAuthBearer {
+			mux.Handle(protectedResourceMetadataPath(inst.Name), protectedResourceMetadataHandler(s.scheme(), inst.Name, inst.Auth.Issuer))
+		}
 	}
 	return mux
 }
