@@ -104,3 +104,28 @@ func TestHasAuthCredentials(t *testing.T) {
 		}
 	})
 }
+
+func TestWithInstanceSelection(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithInstanceSelection(ctx, "prod")
+
+	name, ok := GetInstanceSelection(ctx)
+	if !ok {
+		t.Error("Expected instance selection in context, but none found")
+	}
+	if name != "prod" {
+		t.Errorf("Expected instance name %q, got %q", "prod", name)
+	}
+}
+
+func TestGetInstanceSelection_Missing(t *testing.T) {
+	ctx := context.Background()
+
+	name, ok := GetInstanceSelection(ctx)
+	if ok {
+		t.Error("Expected no instance selection in context, but found one")
+	}
+	if name != "" {
+		t.Errorf("Expected empty instance name when unset, got %q", name)
+	}
+}

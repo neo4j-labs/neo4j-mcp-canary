@@ -13,6 +13,7 @@ const (
 	bearerTokenKey             contextKey = "bearerToken"
 	toolSelectionNamesKey      contextKey = "toolSelectionNames"
 	toolSelectionCategoriesKey contextKey = "toolSelectionCategories"
+	instanceSelectionKey       contextKey = "instanceSelection"
 )
 
 // WithBasicAuth adds basic auth credentials to the context
@@ -64,4 +65,23 @@ func GetToolSelection(ctx context.Context) (names, categories []string, ok bool)
 	names, okNames := ctx.Value(toolSelectionNamesKey).([]string)
 	categories, okCategories := ctx.Value(toolSelectionCategoriesKey).([]string)
 	return names, categories, okNames && okCategories
+}
+
+// WithInstanceSelection records which configured Neo4j instance (see
+// config.NeoInstance) a request targets. Unlike the other per-request
+// values in this file, the instance is resolved once per HTTP route at
+// server startup — from the "/<name>/mcp" path the route is registered
+// under — rather than parsed from each incoming request, so this is set
+// unconditionally by that route's middleware chain, never left unset in
+// multi-instance mode.
+func WithInstanceSelection(ctx context.Context, name string) context.Context {
+	return context.WithValue(ctx, instanceSelectionKey, name)
+}
+
+// GetInstanceSelection retrieves the selected instance name from the
+// context. ok is false outside multi-instance mode (single-instance HTTP
+// mode and STDIO mode never call WithInstanceSelection).
+func GetInstanceSelection(ctx context.Context) (string, bool) {
+	name, ok := ctx.Value(instanceSelectionKey).(string)
+	return name, ok
 }
