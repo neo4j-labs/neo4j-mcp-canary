@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/auth"
-	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
@@ -27,9 +26,9 @@ func applyOptions(options []neo4j.ExecuteQueryConfigurationOption) *neo4j.Execut
 // are properly added to query options in HTTP mode.
 func TestBuildQueryOptions_HTTPMode_BearerToken(t *testing.T) {
 	service := &Neo4jService{
-		driver:        nil, // Not needed for this test
-		database:      "testdb",
-		transportMode: config.TransportModeHTTP,
+		driver:         nil, // Not needed for this test
+		database:       "testdb",
+		perRequestAuth: true,
 	}
 
 	ctx := auth.WithBearerToken(context.Background(), "test-bearer-token")
@@ -53,9 +52,9 @@ func TestBuildQueryOptions_HTTPMode_BearerToken(t *testing.T) {
 // is properly added to query options in HTTP mode when no bearer token is present.
 func TestBuildQueryOptions_HTTPMode_BasicAuth(t *testing.T) {
 	service := &Neo4jService{
-		driver:        nil,
-		database:      "testdb",
-		transportMode: config.TransportModeHTTP,
+		driver:         nil,
+		database:       "testdb",
+		perRequestAuth: true,
 	}
 
 	ctx := auth.WithBasicAuth(context.Background(), "testuser", "testpass")
@@ -76,9 +75,9 @@ func TestBuildQueryOptions_HTTPMode_BasicAuth(t *testing.T) {
 // in context, only the database option is added (no auth token).
 func TestBuildQueryOptions_HTTPMode_NoAuth(t *testing.T) {
 	service := &Neo4jService{
-		driver:        nil,
-		database:      "testdb",
-		transportMode: config.TransportModeHTTP,
+		driver:         nil,
+		database:       "testdb",
+		perRequestAuth: true,
 	}
 
 	ctx := context.Background()
@@ -100,9 +99,9 @@ func TestBuildQueryOptions_HTTPMode_NoAuth(t *testing.T) {
 // no auth token is added to query options (driver's built-in auth is used).
 func TestBuildQueryOptions_STDIOMode_NoAuthAdded(t *testing.T) {
 	service := &Neo4jService{
-		driver:        nil,
-		database:      "testdb",
-		transportMode: config.TransportModeStdio,
+		driver:         nil,
+		database:       "testdb",
+		perRequestAuth: false,
 	}
 
 	// Add bearer token to context (should be ignored in STDIO mode)
@@ -125,9 +124,9 @@ func TestBuildQueryOptions_STDIOMode_NoAuthAdded(t *testing.T) {
 // in context is ignored in STDIO mode.
 func TestBuildQueryOptions_STDIOMode_BasicAuthIgnored(t *testing.T) {
 	service := &Neo4jService{
-		driver:        nil,
-		database:      "testdb",
-		transportMode: config.TransportModeStdio,
+		driver:         nil,
+		database:       "testdb",
+		perRequestAuth: false,
 	}
 
 	// Add basic auth to context (should be ignored in STDIO mode)

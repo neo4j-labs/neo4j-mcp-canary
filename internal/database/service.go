@@ -22,14 +22,32 @@ const appName string = "MCP4NEO4J"
 
 // Neo4jService is the concrete implementation of DatabaseService
 type Neo4jService struct {
-	driver          neo4j.Driver
-	database        string
-	transportMode   config.TransportMode // Transport mode (stdio or http)
+	driver   neo4j.Driver
+	database string
+	// perRequestAuth controls whether buildQueryOptions/executeStreaming
+	// look at the request context for a per-call Bearer/Basic auth
+	// override (true), or rely solely on the driver's own baked-in
+	// credentials (false). NewNeo4jService derives this from transportMode
+	// (http -> true, stdio -> false) for single-instance mode;
+	// NewNeo4jServiceWithAuthMode sets it directly for multi-instance
+	// instances where the two don't line up one-to-one — a static-
+	// service-account instance stays false even though the server as a
+	// whole is running in HTTP mode, since its driver already holds the
+	// real credentials and per-call context has none to give it.
+	perRequestAuth  bool
 	neo4jMCPVersion string
 }
 
-// NewNeo4jService creates a new Neo4jService instance
+// NewNeo4jService creates a new Neo4jService instance for single-instance
+// mode, where transport mode alone determines whether per-call context
+// credentials are used. See NewNeo4jServiceWithAuthMode for direct control.
 func NewNeo4jService(driver neo4j.Driver, database string, transportMode config.TransportMode, neo4jMCPVersion string) (*Neo4jService, error) {
+	return NewNeo4jServiceWithAuthMode(driver, database, transportMode == config.TransportModeHTTP, neo4jMCPVersion)
+}
+
+// NewNeo4jServiceWithAuthMode creates a new Neo4jService instance with
+// direct control over perRequestAuth, for multi-instance HTTP mode.
+func NewNeo4jServiceWithAuthMode(driver neo4j.Driver, database string, perRequestAuth bool, neo4jMCPVersion string) (*Neo4jService, error) {
 	if driver == nil {
 		return nil, fmt.Errorf("driver cannot be nil")
 	}
@@ -37,17 +55,17 @@ func NewNeo4jService(driver neo4j.Driver, database string, transportMode config.
 	return &Neo4jService{
 		driver:          driver,
 		database:        database,
-		transportMode:   transportMode,
+		perRequestAuth:  perRequestAuth,
 		neo4jMCPVersion: neo4jMCPVersion,
 	}, nil
 }
 
-// buildQueryOptions builds Neo4j query options based on transport mode.
-// For HTTP mode: extracts credentials from context and uses impersonation.
+// buildQueryOptions builds Neo4j query options based on perRequestAuth.
+// When true: extracts credentials from context and uses impersonation.
 // Supports both Bearer token auth (preferred for SSO/OAuth) and Basic Auth (fallback).
 // Bearer tokens are passed directly to Neo4j for SSO/OAuth scenarios.
 // If credentials are absent, they are not added to the query options (driver defaults apply).
-// For STDIO mode: uses driver's built-in credentials (no auth token added).
+// When false: uses driver's built-in credentials (no auth token added).
 // The baseOptions parameter allows adding routing-specific options (readers/writers).
 // TxMetadata is added to recognize queries coming from Neo4j MCP.
 func (s *Neo4jService) buildQueryOptions(ctx context.Context, baseOptions ...neo4j.ExecuteQueryConfigurationOption) []neo4j.ExecuteQueryConfigurationOption {
@@ -61,14 +79,14 @@ func (s *Neo4jService) buildQueryOptions(ctx context.Context, baseOptions ...neo
 	// Add any base options (routing, etc.)
 	queryOptions = append(queryOptions, baseOptions...)
 
-	// For HTTP mode, extract credentials from context and use impersonation
-	if s.transportMode == config.TransportModeHTTP {
+	// Extract credentials from context and use impersonation
+	if s.perRequestAuth {
 		authToken := s.getHTTPAuthToken(ctx)
 		if authToken != nil {
 			queryOptions = append(queryOptions, neo4j.ExecuteQueryWithAuthToken(*authToken))
 		}
 	}
-	// For STDIO mode, driver's built-in credentials are used automatically (no auth token needed)
+	// Otherwise, the driver's built-in credentials are used automatically (no auth token needed)
 	return queryOptions
 }
 
@@ -448,12 +466,12 @@ func (s *Neo4jService) executeStreaming(ctx context.Context, cypher string, para
 		DatabaseName: s.database,
 	}
 
-	// HTTP mode: each request carries its own credentials on the context (Bearer or
-	// Basic). SessionConfig.Auth is the v6 equivalent of ExecuteQueryWithAuthToken —
-	// it scopes the auth token to this session only, leaving the driver-level
-	// credentials untouched. STDIO mode falls through and uses the driver's
-	// built-in credentials (no Auth override needed).
-	if s.transportMode == config.TransportModeHTTP {
+	// When perRequestAuth is set, each request carries its own credentials on the
+	// context (Bearer or Basic). SessionConfig.Auth is the v6 equivalent of
+	// ExecuteQueryWithAuthToken — it scopes the auth token to this session only,
+	// leaving the driver-level credentials untouched. Otherwise this falls
+	// through and uses the driver's built-in credentials (no Auth override needed).
+	if s.perRequestAuth {
 		if authToken := s.getHTTPAuthToken(ctx); authToken != nil {
 			sessionConfig.Auth = authToken
 		}
