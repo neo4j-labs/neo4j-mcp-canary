@@ -267,4 +267,12 @@ var fields = []Field{
 			cfg.AllowUnauthenticatedNotificationsInitialize = ParseBool(raw, true)
 		},
 	},
+	{
+		// HTTPAPIKeyHeaderName's default is applied here, but empty-after-
+		// trim validation happens as an explicit post-processing step in
+		// LoadConfig, mirroring AuthHeaderName.
+		Name: "HTTPAPIKeyHeaderName", EnvVar: "NEO4J_MCP_HTTP_API_KEY_HEADER_NAME", FlagName: "neo4j-mcp-http-api-key-header-name",
+		Placeholder: "HEADER", Description: "Name of the HTTP header a client presents a static API key in, for neo4j_instances entries with auth.type=basic", DefaultDisplay: "X-Neo4j-MCP-Api-Key",
+		Setter: func(cfg *Config, raw string) { cfg.HTTPAPIKeyHeaderName = defaultString(raw, "X-Neo4j-MCP-Api-Key") },
+	},
 }

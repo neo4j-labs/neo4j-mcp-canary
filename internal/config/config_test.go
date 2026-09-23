@@ -96,6 +96,49 @@ func TestConfig_Validate(t *testing.T) {
 			wantErr: true,
 			errMsg:  "Neo4j username and password should not be set for HTTP transport mode; credentials are provided per-request via Basic Auth headers",
 		},
+		{
+			name: "valid instances config in HTTP mode",
+			cfg: &Config{
+				Telemetry:     true,
+				TransportMode: TransportModeHTTP,
+				Instances:     []NeoInstance{validBasicInstance("prod")},
+			},
+			wantErr: false,
+		},
+		{
+			name: "instances config in STDIO mode should raise error",
+			cfg: &Config{
+				Telemetry:     true,
+				TransportMode: TransportModeStdio,
+				Instances:     []NeoInstance{validBasicInstance("prod")},
+			},
+			wantErr: true,
+			errMsg:  "neo4j_instances is only supported when the transport mode is 'http'",
+		},
+		{
+			name: "instances combined with top-level URI should raise error",
+			cfg: &Config{
+				Telemetry:     true,
+				TransportMode: TransportModeHTTP,
+				URI:           "bolt://localhost:7687",
+				Instances:     []NeoInstance{validBasicInstance("prod")},
+			},
+			wantErr: true,
+			errMsg:  "neo4j_instances cannot be combined with neo4j_uri/neo4j_username/neo4j_password",
+		},
+		{
+			name: "invalid instances config surfaces ValidateInstances error",
+			cfg: &Config{
+				Telemetry:     true,
+				TransportMode: TransportModeHTTP,
+				Instances: []NeoInstance{{
+					Name: "prod", URI: "neo4j://x:7687",
+					Auth: InstanceAuth{Type: InstanceAuthBasic},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "requires auth.username and auth.password",
+		},
 	}
 
 	for _, tt := range tests {

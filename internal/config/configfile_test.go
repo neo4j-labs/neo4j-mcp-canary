@@ -27,9 +27,12 @@ neo4j_http_tls_enabled: true
 neo4j_cypher_max_rows: 250
 `)
 
-	values, err := loadConfigFile(path)
+	values, instances, err := loadConfigFile(path)
 	if err != nil {
 		t.Fatalf("loadConfigFile() unexpected error: %v", err)
+	}
+	if instances != nil {
+		t.Errorf("instances = %v, want nil (no neo4j_instances key)", instances)
 	}
 
 	want := map[string]string{
@@ -52,7 +55,7 @@ func TestLoadConfigFile_JSON(t *testing.T) {
 		"neo4j_schema_sample_size": 500
 	}`)
 
-	values, err := loadConfigFile(path)
+	values, _, err := loadConfigFile(path)
 	if err != nil {
 		t.Fatalf("loadConfigFile() unexpected error: %v", err)
 	}
@@ -72,7 +75,7 @@ func TestLoadConfigFile_JSON(t *testing.T) {
 func TestLoadConfigFile_CaseInsensitiveKeys(t *testing.T) {
 	path := writeTempConfigFile(t, "config.yaml", `NEO4J_URI: bolt://mixed-case:7687`)
 
-	values, err := loadConfigFile(path)
+	values, _, err := loadConfigFile(path)
 	if err != nil {
 		t.Fatalf("loadConfigFile() unexpected error: %v", err)
 	}
@@ -82,7 +85,7 @@ func TestLoadConfigFile_CaseInsensitiveKeys(t *testing.T) {
 }
 
 func TestLoadConfigFile_MissingFile(t *testing.T) {
-	_, err := loadConfigFile(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
+	_, _, err := loadConfigFile(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
 	if err == nil {
 		t.Fatal("loadConfigFile() expected error for missing file, got nil")
 	}
@@ -91,7 +94,7 @@ func TestLoadConfigFile_MissingFile(t *testing.T) {
 func TestLoadConfigFile_UnsupportedExtension(t *testing.T) {
 	path := writeTempConfigFile(t, "config.toml", `neo4j_uri = "bolt://localhost:7687"`)
 
-	_, err := loadConfigFile(path)
+	_, _, err := loadConfigFile(path)
 	if err == nil || !strings.Contains(err.Error(), "unsupported config file extension") {
 		t.Errorf("loadConfigFile() error = %v, want an unsupported-extension error", err)
 	}
@@ -104,10 +107,117 @@ nested:
   key: value
 `)
 
-	_, err := loadConfigFile(path)
+	_, _, err := loadConfigFile(path)
 	if err == nil || !strings.Contains(err.Error(), "unsupported value type") {
 		t.Errorf("loadConfigFile() error = %v, want an unsupported-value-type error for a nested map", err)
 	}
+}
+
+func TestLoadConfigFile_Instances(t *testing.T) {
+	t.Run("basic auth with api key, plaintext and interpolated fields", func(t *testing.T) {
+		t.Setenv("TEST_PROD_PASSWORD", "s3cret")
+		path := writeTempConfigFile(t, "config.yaml", `
+neo4j_instances:
+  - name: prod
+    uri: neo4j+s://prod.databases.neo4j.io
+    database: neo4j
+    auth:
+      type: basic
+      username: mcp_service
+      password: ${TEST_PROD_PASSWORD}
+      api_keys:
+        - plain-key-1
+`)
+		_, instances, err := loadConfigFile(path)
+		if err != nil {
+			t.Fatalf("loadConfigFile() unexpected error: %v", err)
+		}
+		if len(instances) != 1 {
+			t.Fatalf("len(instances) = %d, want 1", len(instances))
+		}
+		got := instances[0]
+		if got.Name != "prod" || got.URI != "neo4j+s://prod.databases.neo4j.io" || got.Database != "neo4j" {
+			t.Errorf("instance = %+v, want name=prod uri=neo4j+s://prod.databases.neo4j.io database=neo4j", got)
+		}
+		if got.Auth.Type != InstanceAuthBasic || got.Auth.Username != "mcp_service" {
+			t.Errorf("auth = %+v, want type=basic username=mcp_service", got.Auth)
+		}
+		if got.Auth.Password != "s3cret" {
+			t.Errorf("password = %q, want interpolated value s3cret", got.Auth.Password)
+		}
+		if len(got.Auth.APIKeys) != 1 || got.Auth.APIKeys[0] != "plain-key-1" {
+			t.Errorf("api_keys = %v, want [plain-key-1] unchanged", got.Auth.APIKeys)
+		}
+	})
+
+	t.Run("database defaults to neo4j when omitted", func(t *testing.T) {
+		path := writeTempConfigFile(t, "config.yaml", `
+neo4j_instances:
+  - name: staging
+    uri: neo4j://staging.internal:7687
+    auth:
+      type: basic_passthrough
+`)
+		_, instances, err := loadConfigFile(path)
+		if err != nil {
+			t.Fatalf("loadConfigFile() unexpected error: %v", err)
+		}
+		if instances[0].Database != "neo4j" {
+			t.Errorf("Database = %q, want default neo4j", instances[0].Database)
+		}
+	})
+
+	t.Run("missing interpolated env var is a hard error", func(t *testing.T) {
+		path := writeTempConfigFile(t, "config.yaml", `
+neo4j_instances:
+  - name: prod
+    uri: neo4j+s://prod.databases.neo4j.io
+    auth:
+      type: basic
+      username: mcp_service
+      password: ${TEST_DOES_NOT_EXIST_VAR}
+      api_keys: [k]
+`)
+		_, _, err := loadConfigFile(path)
+		if err == nil || !strings.Contains(err.Error(), "TEST_DOES_NOT_EXIST_VAR") {
+			t.Errorf("loadConfigFile() error = %v, want error naming the unset env var", err)
+		}
+	})
+
+	t.Run("neo4j_instances key is case-insensitive and doesn't leak into scalar values", func(t *testing.T) {
+		path := writeTempConfigFile(t, "config.yaml", `
+NEO4J_INSTANCES:
+  - name: staging
+    uri: neo4j://staging.internal:7687
+    auth:
+      type: basic_passthrough
+neo4j_transport_mode: http
+`)
+		values, instances, err := loadConfigFile(path)
+		if err != nil {
+			t.Fatalf("loadConfigFile() unexpected error: %v", err)
+		}
+		if len(instances) != 1 {
+			t.Fatalf("len(instances) = %d, want 1", len(instances))
+		}
+		if _, ok := values["neo4j_instances"]; ok {
+			t.Errorf("values still contains neo4j_instances key: %v", values)
+		}
+		if values["neo4j_transport_mode"] != "http" {
+			t.Errorf("neo4j_transport_mode = %q, want http", values["neo4j_transport_mode"])
+		}
+	})
+
+	t.Run("malformed instances list is a hard error", func(t *testing.T) {
+		path := writeTempConfigFile(t, "config.yaml", `
+neo4j_instances:
+  not_a_list: true
+`)
+		_, _, err := loadConfigFile(path)
+		if err == nil {
+			t.Fatal("loadConfigFile() expected error for malformed neo4j_instances, got nil")
+		}
+	})
 }
 
 // TestLoadConfig_ConfigFilePrecedence exercises the full CLI > env > file >
