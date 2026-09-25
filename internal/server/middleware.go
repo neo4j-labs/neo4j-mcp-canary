@@ -64,6 +64,11 @@ func (s *Neo4jMCPServer) chainMiddleware(allowedOrigins []string, next http.Hand
 	// ToolAccessFilter to consume).
 	handler = toolSelectionMiddleware(s.config.HTTPToolsHeaderName, s.config.HTTPToolCategoriesHeaderName)(handler)
 
+	// Attach this server's top-level embedding provider config (if any) so
+	// set-vector-property's text field / check-embedding-dimensions work in
+	// single-instance HTTP mode too, not just multi-instance.
+	handler = embeddingConfigMiddleware(s.embeddingConfig)(handler)
+
 	// Add CORS middleware (if configured) - includes Mcp-Session-Id in allowed headers
 	handler = corsMiddleware(allowedOrigins, s.config.AuthHeaderName, s.config.HTTPToolsHeaderName, s.config.HTTPToolCategoriesHeaderName)(handler)
 
@@ -84,7 +89,7 @@ func (s *Neo4jMCPServer) chainMiddleware(allowedOrigins []string, next http.Hand
 func (s *Neo4jMCPServer) chainMiddlewareForInstance(inst config.NeoInstance, allowedOrigins []string, next http.Handler) http.Handler {
 	handler := next
 	handler = loggingMiddleware()(handler)
-	handler = instanceAuthMiddleware(inst.Name, inst.Auth, s.config.HTTPAPIKeyHeaderName, s.scheme(), s.bearerVerifier)(handler)
+	handler = instanceAuthMiddleware(inst.Name, inst.Auth, inst.Embedding, s.config.HTTPAPIKeyHeaderName, s.scheme(), s.bearerVerifier)(handler)
 	handler = toolSelectionMiddleware(s.config.HTTPToolsHeaderName, s.config.HTTPToolCategoriesHeaderName)(handler)
 	handler = corsMiddleware(allowedOrigins, s.config.AuthHeaderName, s.config.HTTPToolsHeaderName, s.config.HTTPToolCategoriesHeaderName)(handler)
 	return handler
@@ -127,10 +132,13 @@ type BearerVerifyFunc func(ctx context.Context, instanceAuth config.InstanceAuth
 // authenticate to this server (closing the gap a static per-instance
 // service account would otherwise leave), so every request on every
 // instance route needs valid auth, with no ping/tools-list exception.
-func instanceAuthMiddleware(instanceName string, instAuth config.InstanceAuth, apiKeyHeaderName, scheme string, verifyBearer BearerVerifyFunc) func(http.Handler) http.Handler {
+func instanceAuthMiddleware(instanceName string, instAuth config.InstanceAuth, embedding *config.EmbeddingConfig, apiKeyHeaderName, scheme string, verifyBearer BearerVerifyFunc) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := auth.WithInstanceSelection(r.Context(), instanceName)
+			if embedding != nil {
+				ctx = auth.WithEmbeddingConfig(ctx, embedding)
+			}
 
 			switch instAuth.Type {
 			case config.InstanceAuthBasic:
@@ -339,6 +347,25 @@ func toolSelectionMiddleware(namesHeader, categoriesHeader string) func(http.Han
 			names := parseCommaList(r.Header.Get(namesHeader))
 			categories := parseCommaList(r.Header.Get(categoriesHeader))
 			ctx := auth.WithToolSelection(r.Context(), names, categories)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// embeddingConfigMiddleware attaches this single-instance HTTP server's
+// top-level GenAI embedding provider config (Neo4jMCPServer.embeddingConfig
+// — computed once from Config.EmbeddingProvider/EmbeddingConfiguration,
+// never per-request) to every request's context, the single-instance
+// equivalent of multi-instance mode's per-route instanceAuthMiddleware
+// wiring. A nil embConf (no provider configured) makes this a no-op
+// passthrough.
+func embeddingConfigMiddleware(embConf *config.EmbeddingConfig) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		if embConf == nil {
+			return next
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := auth.WithEmbeddingConfig(r.Context(), embConf)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

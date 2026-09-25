@@ -163,6 +163,81 @@ func TestValidateInstances(t *testing.T) {
 			}},
 			wantErr: "does not use username/password/api_keys",
 		},
+		{
+			name: "valid openai embedding config",
+			instances: []NeoInstance{func() NeoInstance {
+				i := validBasicInstance("prod")
+				i.Embedding = &EmbeddingConfig{
+					Provider:      EmbeddingProviderOpenAI,
+					Configuration: map[string]string{"token": "sk-test", "model": "text-embedding-3-small"},
+				}
+				return i
+			}()},
+		},
+		{
+			name: "valid vertexai embedding config using apiKey",
+			instances: []NeoInstance{func() NeoInstance {
+				i := validBasicInstance("prod")
+				i.Embedding = &EmbeddingConfig{
+					Provider:      EmbeddingProviderVertexAI,
+					Configuration: map[string]string{"model": "text-embedding-005", "project": "my-project", "region": "us-central1", "apiKey": "key"},
+				}
+				return i
+			}()},
+		},
+		{
+			name: "unknown embedding provider rejected",
+			instances: []NeoInstance{func() NeoInstance {
+				i := validBasicInstance("prod")
+				i.Embedding = &EmbeddingConfig{Provider: "local-llm", Configuration: map[string]string{"token": "x"}}
+				return i
+			}()},
+			wantErr: "embedding.provider",
+		},
+		{
+			name: "openai embedding missing required key rejected",
+			instances: []NeoInstance{func() NeoInstance {
+				i := validBasicInstance("prod")
+				i.Embedding = &EmbeddingConfig{Provider: EmbeddingProviderOpenAI, Configuration: map[string]string{"token": "sk-test"}}
+				return i
+			}()},
+			wantErr: `configuration["model"]`,
+		},
+		{
+			name: "vertexai embedding missing apiKey and token rejected",
+			instances: []NeoInstance{func() NeoInstance {
+				i := validBasicInstance("prod")
+				i.Embedding = &EmbeddingConfig{
+					Provider:      EmbeddingProviderVertexAI,
+					Configuration: map[string]string{"model": "text-embedding-005", "project": "my-project", "region": "us-central1"},
+				}
+				return i
+			}()},
+			wantErr: `["apiKey"] or ["token"]`,
+		},
+		{
+			name: "valid openai embedding config with a local baseUrl override",
+			instances: []NeoInstance{func() NeoInstance {
+				i := validBasicInstance("prod")
+				i.Embedding = &EmbeddingConfig{
+					Provider:      EmbeddingProviderOpenAI,
+					Configuration: map[string]string{"token": "unused", "model": "text-embedding-nomic-embed-text-v1.5", "baseUrl": "http://localhost:1234/v1"},
+				}
+				return i
+			}()},
+		},
+		{
+			name: "baseUrl on a non-openai provider is rejected",
+			instances: []NeoInstance{func() NeoInstance {
+				i := validBasicInstance("prod")
+				i.Embedding = &EmbeddingConfig{
+					Provider:      EmbeddingProviderAzureOpenAI,
+					Configuration: map[string]string{"token": "sk-test", "resource": "my-resource", "model": "text-embedding-3-small", "baseUrl": "http://localhost:1234/v1"},
+				}
+				return i
+			}()},
+			wantErr: `["baseUrl"] is only used by embedding.provider "openai"`,
+		},
 	}
 
 	for _, tt := range tests {

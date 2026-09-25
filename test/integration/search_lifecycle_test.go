@@ -153,6 +153,70 @@ func TestVectorSearchLifecycle(t *testing.T) {
 	}
 }
 
+// TestSetVectorPropertyDimensionCheck exercises set-vector-property's
+// dimension check against a real vector index — a vector of the wrong size
+// must be rejected before any write, using the real SHOW INDEXES options
+// column (internal/tools/search/embedding.go's vectorIndexDimensionsByLabelOrType)
+// rather than a mocked one. It doesn't exercise the `text` field or
+// check-embedding-dimensions' embedding-generation path, since those need a
+// real GenAI provider credential this test suite doesn't have.
+func TestSetVectorPropertyDimensionCheck(t *testing.T) {
+	t.Parallel()
+
+	tc := helpers.NewTestContext(t, dbs.GetDriver())
+
+	label, err := tc.SeedNode("Doc", map[string]any{"name": "only"})
+	if err != nil {
+		t.Fatalf("failed to seed node: %v", err)
+	}
+
+	create := search.CreateVectorIndexHandler(tc.Deps)
+	createRes := tc.CallTool(create, map[string]any{
+		"entityType": "NODE",
+		"label":      label.String(),
+		"property":   "embedding",
+		"dimensions": 4,
+	})
+	var createOut struct {
+		Index search.IndexInfo `json:"index"`
+	}
+	tc.ParseJSONResponse(createRes, &createOut)
+	waitForIndexOnline(t, tc, createOut.Index.Name)
+
+	setVec := search.SetVectorPropertyHandler(tc.Deps)
+	errMsg := tc.GetToolError(setVec, map[string]any{
+		"entityType":     "NODE",
+		"label":          label.String(),
+		"filters":        []any{map[string]any{"property": "name", "operator": "=", "value": "only"}},
+		"vectorProperty": "embedding",
+		"vector":         []any{1.0, 0.0, 0.0}, // 3 dims, index expects 4
+	})
+	if errMsg == "" {
+		t.Fatal("expected a dimension-mismatch error message")
+	}
+
+	records, err := tc.Service.ExecuteReadQuery(context.Background(),
+		"MATCH (n) WHERE $label IN labels(n) AND n.name = 'only' RETURN n.embedding AS embedding",
+		map[string]any{"label": label.String()})
+	if err != nil {
+		t.Fatalf("failed to verify node state: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected exactly 1 matching node, got %d", len(records))
+	}
+	if embedding, _ := records[0].Get("embedding"); embedding != nil {
+		t.Errorf("expected no embedding to have been written after a rejected mismatch, got: %v", embedding)
+	}
+
+	check := search.CheckEmbeddingDimensionsHandler(tc.Deps)
+	t.Run("no embedding provider configured on this test instance", func(t *testing.T) {
+		errMsg := tc.GetToolError(check, map[string]any{"indexName": createOut.Index.Name})
+		if errMsg == "" {
+			t.Fatal("expected an error naming the missing embedding provider")
+		}
+	})
+}
+
 // TestFullTextSearchLifecycle exercises create-fulltext-index and
 // fulltext-search end to end — the SEARCH-clause full-text support this
 // depends on only shipped in Neo4j 2026.09, so this is the first live-server

@@ -6,6 +6,8 @@ package auth
 import (
 	"context"
 	"testing"
+
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 )
 
 func TestWithBearerToken(t *testing.T) {
@@ -127,5 +129,47 @@ func TestGetInstanceSelection_Missing(t *testing.T) {
 	}
 	if name != "" {
 		t.Errorf("Expected empty instance name when unset, got %q", name)
+	}
+}
+
+func TestWithEmbeddingConfig(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.EmbeddingConfig{
+		Provider:      config.EmbeddingProviderOpenAI,
+		Configuration: map[string]string{"token": "sk-test", "model": "text-embedding-3-small"},
+	}
+	ctx = WithEmbeddingConfig(ctx, cfg)
+
+	retrieved, ok := GetEmbeddingConfig(ctx)
+	if !ok {
+		t.Fatal("Expected embedding config in context, but none found")
+	}
+	if retrieved != cfg {
+		t.Errorf("Expected embedding config %+v, got %+v", cfg, retrieved)
+	}
+}
+
+func TestGetEmbeddingConfig_Missing(t *testing.T) {
+	ctx := context.Background()
+
+	cfg, ok := GetEmbeddingConfig(ctx)
+	if ok {
+		t.Error("Expected no embedding config in context, but found one")
+	}
+	if cfg != nil {
+		t.Errorf("Expected nil embedding config when unset, got %+v", cfg)
+	}
+}
+
+func TestWithEmbeddingConfig_Nil(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithEmbeddingConfig(ctx, nil)
+
+	cfg, ok := GetEmbeddingConfig(ctx)
+	if ok {
+		t.Error("Expected ok=false for a nil embedding config, but found one")
+	}
+	if cfg != nil {
+		t.Errorf("Expected nil embedding config, got %+v", cfg)
 	}
 }

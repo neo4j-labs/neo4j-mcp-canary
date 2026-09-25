@@ -58,8 +58,8 @@ func TestToolRegister(t *testing.T) {
 		// profile-cypher, list-constraints-and-indexes, create-constraint,
 		// drop-constraint, create-index, drop-index, list-gds-procedures,
 		// give-feedback, vector-search, fulltext-search, create-vector-index,
-		// create-fulltext-index, set-vector-property
-		expectedTotalToolsCount := 17
+		// create-fulltext-index, set-vector-property, check-embedding-dimensions
+		expectedTotalToolsCount := 18
 
 		err := s.Start()
 		if err != nil {
@@ -89,8 +89,8 @@ func TestToolRegister(t *testing.T) {
 		// update this number when a tool is added or removed.
 		// Readonly tools: get-schema, read-cypher, explain-cypher,
 		// list-constraints-and-indexes, list-gds-procedures, give-feedback,
-		// vector-search, fulltext-search
-		expectedTotalToolsCount := 8
+		// vector-search, fulltext-search, check-embedding-dimensions
+		expectedTotalToolsCount := 9
 
 		err := s.Start()
 		if err != nil {
@@ -122,8 +122,8 @@ func TestToolRegister(t *testing.T) {
 		// profile-cypher, list-constraints-and-indexes, create-constraint,
 		// drop-constraint, create-index, drop-index, list-gds-procedures,
 		// give-feedback, vector-search, fulltext-search, create-vector-index,
-		// create-fulltext-index, set-vector-property
-		expectedTotalToolsCount := 17
+		// create-fulltext-index, set-vector-property, check-embedding-dimensions
+		expectedTotalToolsCount := 18
 
 		err := s.Start()
 		if err != nil {
@@ -155,8 +155,8 @@ func TestToolRegister(t *testing.T) {
 		// profile-cypher, list-constraints-and-indexes, create-constraint,
 		// drop-constraint, create-index, drop-index, give-feedback,
 		// vector-search, fulltext-search, create-vector-index,
-		// create-fulltext-index, set-vector-property
-		expectedTotalToolsCount := 16
+		// create-fulltext-index, set-vector-property, check-embedding-dimensions
+		expectedTotalToolsCount := 17
 
 		err := s.Start()
 		if err != nil {
@@ -195,7 +195,7 @@ func TestToolRegister(t *testing.T) {
 		for _, tool := range s.ListTools() {
 			toolNames = append(toolNames, tool.Name)
 		}
-		for _, searchTool := range []string{"vector-search", "fulltext-search", "create-vector-index", "create-fulltext-index", "set-vector-property"} {
+		for _, searchTool := range []string{"vector-search", "fulltext-search", "create-vector-index", "create-fulltext-index", "set-vector-property", "check-embedding-dimensions"} {
 			assert.NotContains(t, toolNames, searchTool)
 		}
 		// Baseline count from before the search category existed — proves

@@ -1,0 +1,3 @@
+kind: Added
+body: The search category's set-vector-property tool now checks a generated or caller-supplied vector's dimensions against any existing matching vector index before writing (via Neo4j's SHOW INDEXES options column), rejecting a mismatch with a clear error instead of silently storing a vector the index can't use. A new check-embedding-dimensions tool lets a caller validate a configured embedding provider/model against a vector index's dimensions up front, without writing anything.
+time: 2026-09-25T14:38:06.178735+01:00

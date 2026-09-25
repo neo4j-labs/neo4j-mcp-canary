@@ -154,6 +154,15 @@ func expandInstanceEnvVars(inst *NeoInstance) error {
 		}
 		*f = expanded
 	}
+	if inst.Embedding != nil {
+		for k, v := range inst.Embedding.Configuration {
+			expanded, err := expandEnvVars(v)
+			if err != nil {
+				return err
+			}
+			inst.Embedding.Configuration[k] = expanded
+		}
+	}
 	for i, k := range inst.Auth.APIKeys {
 		expanded, err := expandEnvVars(k)
 		if err != nil {

@@ -71,6 +71,20 @@
       "description": "Number of nodes to sample for schema inference",
       "required": false,
       "sensitive": false
+    },
+    "NEO4J_MCP_EMBEDDING_PROVIDER": {
+      "type": "string",
+      "title": "Embedding provider",
+      "description": "GenAI embedding provider for set-vector-property's text field / check-embedding-dimensions: openai, azure-openai, vertexai, or bedrock-titan; leave unset to disable both",
+      "required": false,
+      "sensitive": false
+    },
+    "NEO4J_MCP_EMBEDDING_CONFIGURATION": {
+      "type": "string",
+      "title": "Embedding provider configuration",
+      "description": "Comma-separated key=value settings for the embedding provider above (e.g. token=sk-xxx,model=text-embedding-3-small) — required keys vary by provider",
+      "required": false,
+      "sensitive": true
     }
   },
   "server": {
@@ -87,7 +101,9 @@
         "NEO4J_TELEMETRY": "${user_config.NEO4J_TELEMETRY}",
         "NEO4J_LOG_LEVEL": "${user_config.NEO4J_LOG_LEVEL}",
         "NEO4J_LOG_FORMAT": "${user_config.NEO4J_LOG_FORMAT}",
-        "NEO4J_SCHEMA_SAMPLE_SIZE": "${user_config.NEO4J_SCHEMA_SAMPLE_SIZE}"
+        "NEO4J_SCHEMA_SAMPLE_SIZE": "${user_config.NEO4J_SCHEMA_SAMPLE_SIZE}",
+        "NEO4J_MCP_EMBEDDING_PROVIDER": "${user_config.NEO4J_MCP_EMBEDDING_PROVIDER}",
+        "NEO4J_MCP_EMBEDDING_CONFIGURATION": "${user_config.NEO4J_MCP_EMBEDDING_CONFIGURATION}"
       }
     }
   },
@@ -155,6 +171,10 @@
     {
       "name": "set-vector-property",
       "description": "Set a node or relationship's embedding vector property"
+    },
+    {
+      "name": "check-embedding-dimensions",
+      "description": "Validate a configured embedding provider/model against a vector index's dimensions"
     }
   ],
   "compatibility": {

@@ -144,9 +144,12 @@ func handleCreateVectorIndex(ctx context.Context, request *mcpsdk.CallToolReques
 // --- Output types ---
 
 // VectorIndexConfig echoes the resolved vector.* configuration actually
-// applied — SHOW INDEXES has no columns for these, so this is the only
-// place a caller can see the effective values (including defaults for
-// anything left unset).
+// applied (including defaults for anything left unset). SHOW INDEXES does
+// expose these too, nested in its options column
+// ({indexConfig: {`vector.dimensions`: N, ...}} — see embedding.go's
+// vectorDimensionsFromOptions), but this response field is populated from
+// what create-vector-index itself just resolved, saving the caller a
+// second lookup right after creating the index.
 type VectorIndexConfig struct {
 	Dimensions         int    `json:"dimensions"`
 	SimilarityFunction string `json:"similarityFunction"`

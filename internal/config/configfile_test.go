@@ -150,6 +150,39 @@ neo4j_instances:
 		}
 	})
 
+	t.Run("embedding config, plaintext and interpolated fields", func(t *testing.T) {
+		t.Setenv("TEST_OPENAI_TOKEN", "sk-test-token")
+		path := writeTempConfigFile(t, "config.yaml", `
+neo4j_instances:
+  - name: prod
+    uri: neo4j+s://prod.databases.neo4j.io
+    auth:
+      type: basic_passthrough
+    embedding:
+      provider: openai
+      configuration:
+        token: ${TEST_OPENAI_TOKEN}
+        model: text-embedding-3-small
+`)
+		_, instances, err := loadConfigFile(path)
+		if err != nil {
+			t.Fatalf("loadConfigFile() unexpected error: %v", err)
+		}
+		got := instances[0].Embedding
+		if got == nil {
+			t.Fatal("Embedding = nil, want a configured EmbeddingConfig")
+		}
+		if got.Provider != EmbeddingProviderOpenAI {
+			t.Errorf("Provider = %q, want openai", got.Provider)
+		}
+		if got.Configuration["token"] != "sk-test-token" {
+			t.Errorf("token = %q, want interpolated value sk-test-token", got.Configuration["token"])
+		}
+		if got.Configuration["model"] != "text-embedding-3-small" {
+			t.Errorf("model = %q, want text-embedding-3-small unchanged", got.Configuration["model"])
+		}
+	})
+
 	t.Run("database defaults to neo4j when omitted", func(t *testing.T) {
 		path := writeTempConfigFile(t, "config.yaml", `
 neo4j_instances:

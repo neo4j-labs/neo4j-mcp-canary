@@ -3,7 +3,11 @@
 
 package auth
 
-import "context"
+import (
+	"context"
+
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
+)
 
 type contextKey string
 
@@ -14,6 +18,7 @@ const (
 	toolSelectionNamesKey      contextKey = "toolSelectionNames"
 	toolSelectionCategoriesKey contextKey = "toolSelectionCategories"
 	instanceSelectionKey       contextKey = "instanceSelection"
+	embeddingConfigKey         contextKey = "embeddingConfig"
 )
 
 // WithBasicAuth adds basic auth credentials to the context
@@ -84,4 +89,22 @@ func WithInstanceSelection(ctx context.Context, name string) context.Context {
 func GetInstanceSelection(ctx context.Context) (string, bool) {
 	name, ok := ctx.Value(instanceSelectionKey).(string)
 	return name, ok
+}
+
+// WithEmbeddingConfig records the selected Neo4j instance's GenAI embedding
+// provider configuration (config.NeoInstance.Embedding) on the context, set
+// alongside WithInstanceSelection by the same multi-instance route
+// middleware. A tool handler that needs to generate an embedding
+// server-side (rather than accept a caller-supplied vector) reads this back
+// via GetEmbeddingConfig to build its ai.text.embed call.
+func WithEmbeddingConfig(ctx context.Context, cfg *config.EmbeddingConfig) context.Context {
+	return context.WithValue(ctx, embeddingConfigKey, cfg)
+}
+
+// GetEmbeddingConfig retrieves the selected instance's embedding provider
+// configuration from the context. ok is false when no instance is selected,
+// or the selected instance has no Embedding configured.
+func GetEmbeddingConfig(ctx context.Context) (*config.EmbeddingConfig, bool) {
+	cfg, ok := ctx.Value(embeddingConfigKey).(*config.EmbeddingConfig)
+	return cfg, ok && cfg != nil
 }

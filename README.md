@@ -210,6 +210,8 @@ Core connection and behaviour:
 | `NEO4J_LOG_FORMAT`                   | `text`    | `text` or `json`                                                               |
 | `NEO4J_OUTPUT_FORMAT`                | `json`    | Tool response format sent to the LLM client: `json`, `toon`, or `markdown`     |
 | `NEO4J_TRANSPORT_MODE`               | `stdio`   | `stdio` or `http` (supersedes the deprecated `NEO4J_MCP_TRANSPORT`)            |
+| `NEO4J_MCP_EMBEDDING_PROVIDER`       | —         | GenAI embedding provider for `set-vector-property`'s `text` field / `check-embedding-dimensions`: `openai`, `azure-openai`, `vertexai`, or `bedrock-titan`; unset disables both |
+| `NEO4J_MCP_EMBEDDING_CONFIGURATION`  | —         | Comma-separated `key=value` settings for the provider above (e.g. `token=sk-xxx,model=text-embedding-3-small`) — see [Multi-Instance HTTP Mode](docs/MULTI_INSTANCE.md#embedding-provider-optional) for the required keys per provider; mutually exclusive with `neo4j_instances` (configure embedding per instance there instead) |
 
 #### Connecting via the Query API instead of Bolt
 
@@ -276,6 +278,8 @@ Available flags:
 - `--neo4j-telemetry` — overrides `NEO4J_TELEMETRY` (`true` / `false`)
 - `--neo4j-schema-sample-size` — overrides `NEO4J_SCHEMA_SAMPLE_SIZE`
 - `--neo4j-output-format` — overrides `NEO4J_OUTPUT_FORMAT` (`json` / `toon` / `markdown`)
+- `--neo4j-mcp-embedding-provider` — overrides `NEO4J_MCP_EMBEDDING_PROVIDER`
+- `--neo4j-mcp-embedding-configuration` — overrides `NEO4J_MCP_EMBEDDING_CONFIGURATION` (comma-separated `key=value` pairs)
 
 **Cypher execution safeguards**
 
@@ -491,7 +495,8 @@ Provided tools:
 | `fulltext-search`               | `search`   | `true`   | Lucene-backed full-text search against a fulltext index               | Same auto-detection as `vector-search`.                                                                                                     |
 | `create-vector-index`           | `search`   | `false`  | Create a vector index for similarity search                          | `filterableProperties` registers properties usable later in `vector-search`'s `filters`.                                                   |
 | `create-fulltext-index`         | `search`   | `false`  | Create a fulltext index for text search                              | Supports multiple labels/relationship types.                                                                                                |
-| `set-vector-property`           | `search`   | `false`  | Set a node or relationship's embedding vector property                | Uses `db.create.setNodeVectorProperty`/`setRelationshipVectorProperty`. Requires at least one filter.                                       |
+| `set-vector-property`           | `search`   | `false`  | Set a node or relationship's embedding vector property                | Uses `db.create.setNodeVectorProperty`/`setRelationshipVectorProperty`. Requires at least one filter. Accepts a pre-computed `vector`, or `text` to embed server-side if the instance has an embedding provider configured — see [Multi-Instance HTTP Mode](docs/MULTI_INSTANCE.md#embedding-provider-optional). |
+| `check-embedding-dimensions`    | `search`   | `true`   | Validate a configured embedding provider/model against a vector index's dimensions | Generates one throwaway embedding, writes nothing. Requires an embedding provider configured on the instance.                  |
 | `list-gds-procedures`           | `gds`      | `true`   | List GDS procedures available in the Neo4j instance                  | Disabled automatically if GDS is not installed.                                                                                             |
 | `give-feedback`                 | `feedback` | `true`   | Submit free-text feedback about the MCP server itself                | For feedback on the server (tools, behaviour, docs), not on Cypher/database issues. Limited to 300 characters. See [Feedback](#feedback). |
 
@@ -560,9 +565,9 @@ If the wrapped query produces a syntax error, the server strips the internal `EX
 
 ### Vector and full-text search tools
 
-The `search` category — `vector-search`, `fulltext-search`, `create-vector-index`, `create-fulltext-index`, `set-vector-property` — surfaces Cypher 25's `SEARCH` clause through structured fields only; no tool in this category accepts or returns raw Cypher. `vector-search`/`fulltext-search` auto-detect the target node label or relationship type from the index itself, so the caller only needs the index name. `vector-search`'s `filters` only work on properties registered as filterable at index-creation time via `create-vector-index`'s `filterableProperties` — filtering on any other property is a hard Neo4j limitation, not a tool restriction. Every tool takes a caller-supplied embedding (`[]float64`) — the server does not generate embeddings or manage AI-provider credentials.
+The `search` category — `vector-search`, `fulltext-search`, `create-vector-index`, `create-fulltext-index`, `set-vector-property`, `check-embedding-dimensions` — surfaces Cypher 25's `SEARCH` clause through structured fields only; no tool in this category accepts or returns raw Cypher. `vector-search`/`fulltext-search` auto-detect the target node label or relationship type from the index itself, so the caller only needs the index name. `vector-search`'s `filters` only work on properties registered as filterable at index-creation time via `create-vector-index`'s `filterableProperties` — filtering on any other property is a hard Neo4j limitation, not a tool restriction. `set-vector-property` takes either a caller-supplied embedding (`vector`) or raw `text` to embed — the latter only works when the connected Neo4j instance has an embedding provider configured, via `NEO4J_MCP_EMBEDDING_PROVIDER`/`NEO4J_MCP_EMBEDDING_CONFIGURATION` in single-instance mode (STDIO or single-instance HTTP) or via each entry's own `embedding` block in multi-instance HTTP mode (see [Multi-Instance HTTP Mode](docs/MULTI_INSTANCE.md#embedding-provider-optional) for the full provider/required-key table, which applies to both). Who actually generates it depends on the provider: `openai` is generated by this MCP server itself via a direct HTTP call (its `baseUrl` config key can redirect this to a local OpenAI-compatible server like LM Studio or Ollama, with no Neo4j-side involvement at all), while `azure-openai`/`vertexai`/`bedrock-titan` are generated by Neo4j's own GenAI plugin (`ai.text.embed`) instead, reusing the auth schemes it already implements. Either way, if a matching vector index already exists, the resulting vector's dimensions are checked against it before writing, and `check-embedding-dimensions` lets a caller validate a provider/model against an index up front without writing anything.
 
-This category requires a server on calendar version >= `2026.09.0` or classic Aura >= `5.27-aura` (native full-text `SEARCH`-clause support shipped in Neo4j's 2026.09 release; vector search alone works from `2026.01`, but the whole category is gated behind the higher floor for consistency). Below that floor, the five tools are automatically excluded from `tools/list` rather than failing at call time — the same way `list-gds-procedures` is excluded when GDS isn't installed.
+This category requires a server on calendar version >= `2026.09.0` or classic Aura >= `5.27-aura` (native full-text `SEARCH`-clause support shipped in Neo4j's 2026.09 release; vector search alone works from `2026.01`, but the whole category is gated behind the higher floor for consistency). Below that floor, the six tools are automatically excluded from `tools/list` rather than failing at call time — the same way `list-gds-procedures` is excluded when GDS isn't installed.
 
 ### Response format for `read-cypher` / `write-cypher`
 

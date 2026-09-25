@@ -809,11 +809,96 @@ func instanceSelectionCheckHandler(t *testing.T, expectedName string) http.Handl
 	})
 }
 
+// embeddingConfigCheckHandler verifies the expected embedding config (or its
+// absence) landed in context via auth.WithEmbeddingConfig.
+func embeddingConfigCheckHandler(t *testing.T, want *config.EmbeddingConfig) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, ok := auth.GetEmbeddingConfig(r.Context())
+		if want == nil {
+			if ok {
+				t.Errorf("Expected no embedding config in context, but found %+v", got)
+			}
+		} else {
+			if !ok {
+				t.Fatal("Expected embedding config in context, but none found")
+			}
+			if got != want {
+				t.Errorf("Expected embedding config %+v, got %+v", want, got)
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+}
+
+func TestEmbeddingConfigMiddleware(t *testing.T) {
+	t.Run("configured embedding is attached to context", func(t *testing.T) {
+		embedding := &config.EmbeddingConfig{
+			Provider:      config.EmbeddingProviderOpenAI,
+			Configuration: map[string]string{"token": "sk-test", "model": "text-embedding-3-small"},
+		}
+		handler := embeddingConfigMiddleware(embedding)(embeddingConfigCheckHandler(t, embedding))
+
+		req := httptest.NewRequest("POST", "/mcp", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", rec.Code)
+		}
+	})
+
+	t.Run("nil embedding config is a no-op passthrough", func(t *testing.T) {
+		handler := embeddingConfigMiddleware(nil)(embeddingConfigCheckHandler(t, nil))
+
+		req := httptest.NewRequest("POST", "/mcp", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", rec.Code)
+		}
+	})
+}
+
+func TestInstanceAuthMiddleware_EmbeddingConfig(t *testing.T) {
+	instAuth := config.InstanceAuth{Type: config.InstanceAuthBasic, APIKeys: []string{"good-key"}}
+
+	t.Run("configured embedding is attached to context", func(t *testing.T) {
+		embedding := &config.EmbeddingConfig{
+			Provider:      config.EmbeddingProviderOpenAI,
+			Configuration: map[string]string{"token": "sk-test", "model": "text-embedding-3-small"},
+		}
+		handler := instanceAuthMiddleware("prod", instAuth, embedding, "X-Api-Key", "https", nil)(embeddingConfigCheckHandler(t, embedding))
+
+		req := httptest.NewRequest("POST", "/prod/mcp", nil)
+		req.Header.Set("X-Api-Key", "good-key")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", rec.Code)
+		}
+	})
+
+	t.Run("no embedding configured leaves context unset", func(t *testing.T) {
+		handler := instanceAuthMiddleware("prod", instAuth, nil, "X-Api-Key", "https", nil)(embeddingConfigCheckHandler(t, nil))
+
+		req := httptest.NewRequest("POST", "/prod/mcp", nil)
+		req.Header.Set("X-Api-Key", "good-key")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", rec.Code)
+		}
+	})
+}
+
 func TestInstanceAuthMiddleware_Basic(t *testing.T) {
 	instAuth := config.InstanceAuth{Type: config.InstanceAuthBasic, APIKeys: []string{"good-key"}}
 
 	t.Run("valid API key is accepted and instance selection is set", func(t *testing.T) {
-		handler := instanceAuthMiddleware("prod", instAuth, "X-Api-Key", "https", nil)(instanceSelectionCheckHandler(t, "prod"))
+		handler := instanceAuthMiddleware("prod", instAuth, nil, "X-Api-Key", "https", nil)(instanceSelectionCheckHandler(t, "prod"))
 
 		req := httptest.NewRequest("POST", "/prod/mcp", nil)
 		req.Header.Set("X-Api-Key", "good-key")
@@ -826,7 +911,7 @@ func TestInstanceAuthMiddleware_Basic(t *testing.T) {
 	})
 
 	t.Run("missing API key is rejected", func(t *testing.T) {
-		handler := instanceAuthMiddleware("prod", instAuth, "X-Api-Key", "https", nil)(mockHandler())
+		handler := instanceAuthMiddleware("prod", instAuth, nil, "X-Api-Key", "https", nil)(mockHandler())
 
 		req := httptest.NewRequest("POST", "/prod/mcp", nil)
 		rec := httptest.NewRecorder()
@@ -838,7 +923,7 @@ func TestInstanceAuthMiddleware_Basic(t *testing.T) {
 	})
 
 	t.Run("wrong API key is rejected", func(t *testing.T) {
-		handler := instanceAuthMiddleware("prod", instAuth, "X-Api-Key", "https", nil)(mockHandler())
+		handler := instanceAuthMiddleware("prod", instAuth, nil, "X-Api-Key", "https", nil)(mockHandler())
 
 		req := httptest.NewRequest("POST", "/prod/mcp", nil)
 		req.Header.Set("X-Api-Key", "wrong-key")
@@ -851,7 +936,7 @@ func TestInstanceAuthMiddleware_Basic(t *testing.T) {
 	})
 
 	t.Run("a different instance's API key is rejected", func(t *testing.T) {
-		handler := instanceAuthMiddleware("prod", instAuth, "X-Api-Key", "https", nil)(mockHandler())
+		handler := instanceAuthMiddleware("prod", instAuth, nil, "X-Api-Key", "https", nil)(mockHandler())
 
 		req := httptest.NewRequest("POST", "/prod/mcp", nil)
 		req.Header.Set("X-Api-Key", "some-other-instances-key")
@@ -868,7 +953,7 @@ func TestInstanceAuthMiddleware_BasicPassthrough(t *testing.T) {
 	instAuth := config.InstanceAuth{Type: config.InstanceAuthBasicPassthrough}
 
 	t.Run("valid basic credentials are forwarded and instance selection is set", func(t *testing.T) {
-		handler := instanceAuthMiddleware("staging", instAuth, "X-Api-Key", "https", nil)(authCheckHandler(t, true, "user", "pass"))
+		handler := instanceAuthMiddleware("staging", instAuth, nil, "X-Api-Key", "https", nil)(authCheckHandler(t, true, "user", "pass"))
 
 		req := httptest.NewRequest("POST", "/staging/mcp", nil)
 		req.SetBasicAuth("user", "pass")
@@ -881,7 +966,7 @@ func TestInstanceAuthMiddleware_BasicPassthrough(t *testing.T) {
 	})
 
 	t.Run("missing basic credentials are rejected", func(t *testing.T) {
-		handler := instanceAuthMiddleware("staging", instAuth, "X-Api-Key", "https", nil)(mockHandler())
+		handler := instanceAuthMiddleware("staging", instAuth, nil, "X-Api-Key", "https", nil)(mockHandler())
 
 		req := httptest.NewRequest("POST", "/staging/mcp", nil)
 		rec := httptest.NewRecorder()
@@ -899,7 +984,7 @@ func TestInstanceAuthMiddleware_Bearer(t *testing.T) {
 	}
 
 	t.Run("missing bearer token is rejected", func(t *testing.T) {
-		handler := instanceAuthMiddleware("analytics", instAuth, "X-Api-Key", "https", nil)(mockHandler())
+		handler := instanceAuthMiddleware("analytics", instAuth, nil, "X-Api-Key", "https", nil)(mockHandler())
 
 		req := httptest.NewRequest("POST", "/analytics/mcp", nil)
 		rec := httptest.NewRecorder()
@@ -911,7 +996,7 @@ func TestInstanceAuthMiddleware_Bearer(t *testing.T) {
 	})
 
 	t.Run("no verifier configured yet returns 501, not a silent pass", func(t *testing.T) {
-		handler := instanceAuthMiddleware("analytics", instAuth, "X-Api-Key", "https", nil)(mockHandler())
+		handler := instanceAuthMiddleware("analytics", instAuth, nil, "X-Api-Key", "https", nil)(mockHandler())
 
 		req := httptest.NewRequest("POST", "/analytics/mcp", nil)
 		req.Header.Set("Authorization", "Bearer some-token")
@@ -927,7 +1012,7 @@ func TestInstanceAuthMiddleware_Bearer(t *testing.T) {
 		verifier := func(_ context.Context, _ config.InstanceAuth, _ string) error {
 			return errors.New("invalid signature")
 		}
-		handler := instanceAuthMiddleware("analytics", instAuth, "X-Api-Key", "https", verifier)(mockHandler())
+		handler := instanceAuthMiddleware("analytics", instAuth, nil, "X-Api-Key", "https", verifier)(mockHandler())
 
 		req := httptest.NewRequest("POST", "/analytics/mcp", nil)
 		req.Header.Set("Authorization", "Bearer bad-token")
@@ -946,7 +1031,7 @@ func TestInstanceAuthMiddleware_Bearer(t *testing.T) {
 			}
 			return nil
 		}
-		handler := instanceAuthMiddleware("analytics", instAuth, "X-Api-Key", "https", verifier)(bearerTokenCheckHandler(t, true, "good-token"))
+		handler := instanceAuthMiddleware("analytics", instAuth, nil, "X-Api-Key", "https", verifier)(bearerTokenCheckHandler(t, true, "good-token"))
 
 		req := httptest.NewRequest("POST", "/analytics/mcp", nil)
 		req.Header.Set("Authorization", "Bearer good-token")
@@ -1054,7 +1139,7 @@ func TestInstanceAuthMiddleware_Bearer_WWWAuthenticateResourceMetadata(t *testin
 	wantMeta := `resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/analytics/mcp"`
 
 	t.Run("missing token includes resource_metadata", func(t *testing.T) {
-		handler := instanceAuthMiddleware("analytics", instAuth, "X-Api-Key", "https", nil)(mockHandler())
+		handler := instanceAuthMiddleware("analytics", instAuth, nil, "X-Api-Key", "https", nil)(mockHandler())
 
 		req := httptest.NewRequest("POST", "/analytics/mcp", nil)
 		req.Host = "mcp.example.com"
@@ -1070,7 +1155,7 @@ func TestInstanceAuthMiddleware_Bearer_WWWAuthenticateResourceMetadata(t *testin
 		verifier := func(_ context.Context, _ config.InstanceAuth, _ string) error {
 			return errors.New("bad token")
 		}
-		handler := instanceAuthMiddleware("analytics", instAuth, "X-Api-Key", "https", verifier)(mockHandler())
+		handler := instanceAuthMiddleware("analytics", instAuth, nil, "X-Api-Key", "https", verifier)(mockHandler())
 
 		req := httptest.NewRequest("POST", "/analytics/mcp", nil)
 		req.Host = "mcp.example.com"

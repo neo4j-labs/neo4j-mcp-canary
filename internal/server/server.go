@@ -59,8 +59,15 @@ type Neo4jMCPServer struct {
 	events                 *eventing.Emitter
 	gdsInstalled           bool
 	searchVersionSupported bool
-	initMu                 sync.Mutex
-	connectionVerified     atomic.Bool
+	// embeddingConfig is the top-level GenAI embedding provider config for
+	// single-instance mode (STDIO or single-instance HTTP) — computed once
+	// from cfg.EmbeddingConfig() since it never varies per request, unlike
+	// multi-instance mode's per-route NeoInstance.Embedding. Nil means no
+	// provider is configured. See Start's STDIO branch and
+	// chainMiddleware's embeddingConfigMiddleware wiring.
+	embeddingConfig    *config.EmbeddingConfig
+	initMu             sync.Mutex
+	connectionVerified atomic.Bool
 	// bearerVerifier verifies a client-presented Bearer token for a
 	// bearer-type multi-instance route (issuer/audience/signature/expiry
 	// against that instance's configured JWKS). Set via SetBearerVerifier
@@ -82,6 +89,16 @@ func (s *Neo4jMCPServer) SetBearerVerifier(verifier BearerVerifyFunc) {
 // The config parameter is expected to be already validated
 func NewNeo4jMCPServer(version string, cfg *config.Config, dbService database.Service, anService analytics.Service) *Neo4jMCPServer {
 
+	// cfg is expected to already be validated (see this function's doc
+	// comment), so a non-nil error here would mean Validate itself has a
+	// bug letting an invalid embedding config through — not a runtime
+	// condition to handle gracefully. Logged rather than silently dropped
+	// so that bug would still be visible.
+	embeddingConfig, err := cfg.EmbeddingConfig()
+	if err != nil {
+		slog.Error("ignoring invalid embedding configuration that should have been caught by Config.Validate", "error", err)
+	}
+
 	neo4jServer := &Neo4jMCPServer{
 		HTTPServerReady: make(chan struct{}),
 		shutdownChan:    make(chan struct{}),
@@ -91,6 +108,7 @@ func NewNeo4jMCPServer(version string, cfg *config.Config, dbService database.Se
 		anService:       anService,
 		events:          eventing.NewEmitter(anService, dbService, cfg, version),
 		gdsInstalled:    false,
+		embeddingConfig: embeddingConfig,
 	}
 
 	neo4jServer.mcpServer = mcpsdk.NewServer(
@@ -143,7 +161,11 @@ func (s *Neo4jMCPServer) Start() error {
 			s.events.EmitServerStartup()
 			s.events.EmitConnectionInitialized(context.Background())
 
-			return s.mcpServer.ServeStdio(context.Background())
+			ctx := context.Background()
+			if s.embeddingConfig != nil {
+				ctx = auth.WithEmbeddingConfig(ctx, s.embeddingConfig)
+			}
+			return s.mcpServer.ServeStdio(ctx)
 		}
 	default:
 		return fmt.Errorf("unsupported transport mode: %s", s.config.TransportMode)
