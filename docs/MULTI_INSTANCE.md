@@ -39,6 +39,11 @@ neo4j_instances:
       password: ${NEO4J_PROD_PASSWORD}
       api_keys:
         - ${MCP_PROD_API_KEY}
+    embedding: # optional — see "Embedding provider (optional)" below
+      provider: openai
+      configuration:
+        token: ${OPENAI_API_KEY}
+        model: text-embedding-3-small
 
   - name: staging
     uri: neo4j://staging.internal:7687
@@ -64,7 +69,10 @@ plaintext value; the two styles can be mixed freely within one config file.
 Each instance's `database` defaults to `neo4j` if omitted. Each `name` must
 be a safe, single URL path segment (letters, digits, `-`, `_`; no `/`) and
 unique across the list — it becomes part of the URL a client connects to,
-below.
+below. The `embedding` block on `prod` above is optional — see "Embedding
+provider (optional)" further down for what it does and the other supported
+providers; an instance with no `embedding` block still works, it just can't
+use `set-vector-property`'s `text` field.
 
 ## How a client reaches an instance
 
