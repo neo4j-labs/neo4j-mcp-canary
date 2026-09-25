@@ -25,6 +25,7 @@ import (
 
 	analytics "github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics/mocks"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
 	db "github.com/neo4j-labs/neo4j-mcp-canary/internal/database/mocks"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk/mcpsdktest"
 	server "github.com/neo4j-labs/neo4j-mcp-canary/internal/server"
@@ -192,8 +193,8 @@ func createStreamableHTTPClient(url string) *mcpsdktest.Client {
 	)
 }
 
-func createHTTPServer(t *testing.T, cfg *config.Config, mockDB *db.MockService, analyticsService *analytics.MockService) (*server.Neo4jMCPServer, chan error) {
-	s := server.NewNeo4jMCPServer("test-version", cfg, mockDB, analyticsService)
+func createHTTPServer(t *testing.T, cfg *config.Config, dbService database.Service, analyticsService *analytics.MockService) (*server.Neo4jMCPServer, chan error) {
+	s := server.NewNeo4jMCPServer("test-version", cfg, dbService, analyticsService)
 	if s == nil {
 		t.Fatal("NewNeo4jMCPServer() returned nil")
 	}

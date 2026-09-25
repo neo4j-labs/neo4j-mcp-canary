@@ -41,7 +41,7 @@ func CreateVectorIndexSpec() mcpsdk.Tool {
 		A vector index enables approximate nearest-neighbor similarity search (via vector-search) over a single embedding property on a node label or relationship type.
 		dimensions and similarityFunction should match whatever embedding model produced the vectors you plan to store (e.g. 1536 dimensions / cosine similarity for many OpenAI embedding models) — a mismatch will not be caught at index-creation time, only later when stored vectors don't fit.
 		filterableProperties registers extra properties that can later be used in vector-search's filters for in-index WHERE filtering; a property NOT listed here cannot be filtered on later, even if it exists on the entity.
-		SHOW INDEXES has no columns for the resolved vector.* configuration, so the response's config field is the only place to see the effective dimensions/similarityFunction/quantizationType/hnswM/hnswEfConstruction actually applied (including defaults for anything you didn't set).
+		The response's config field echoes the effective dimensions/similarityFunction/quantizationType/hnswM/hnswEfConstruction actually applied (including defaults for anything you didn't set), saving a separate lookup right after creation; check-embedding-dimensions can validate an embedding provider/model against an existing index's dimensions later.
 		When name is omitted, a generated name is assigned and returned in the response so it can be used later with drop-index or vector-search.`),
 		mcpsdk.WithString("name",
 			mcpsdk.Description("Optional name for the index. When omitted, a name is generated automatically and returned in the response."),

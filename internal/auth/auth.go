@@ -3,7 +3,11 @@
 
 package auth
 
-import "context"
+import (
+	"context"
+
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
+)
 
 type contextKey string
 
@@ -13,6 +17,8 @@ const (
 	bearerTokenKey             contextKey = "bearerToken"
 	toolSelectionNamesKey      contextKey = "toolSelectionNames"
 	toolSelectionCategoriesKey contextKey = "toolSelectionCategories"
+	instanceSelectionKey       contextKey = "instanceSelection"
+	embeddingConfigKey         contextKey = "embeddingConfig"
 )
 
 // WithBasicAuth adds basic auth credentials to the context
@@ -64,4 +70,41 @@ func GetToolSelection(ctx context.Context) (names, categories []string, ok bool)
 	names, okNames := ctx.Value(toolSelectionNamesKey).([]string)
 	categories, okCategories := ctx.Value(toolSelectionCategoriesKey).([]string)
 	return names, categories, okNames && okCategories
+}
+
+// WithInstanceSelection records which configured Neo4j instance (see
+// config.NeoInstance) a request targets. Unlike the other per-request
+// values in this file, the instance is resolved once per HTTP route at
+// server startup — from the "/<name>/mcp" path the route is registered
+// under — rather than parsed from each incoming request, so this is set
+// unconditionally by that route's middleware chain, never left unset in
+// multi-instance mode.
+func WithInstanceSelection(ctx context.Context, name string) context.Context {
+	return context.WithValue(ctx, instanceSelectionKey, name)
+}
+
+// GetInstanceSelection retrieves the selected instance name from the
+// context. ok is false outside multi-instance mode (single-instance HTTP
+// mode and STDIO mode never call WithInstanceSelection).
+func GetInstanceSelection(ctx context.Context) (string, bool) {
+	name, ok := ctx.Value(instanceSelectionKey).(string)
+	return name, ok
+}
+
+// WithEmbeddingConfig records the selected Neo4j instance's GenAI embedding
+// provider configuration (config.NeoInstance.Embedding) on the context, set
+// alongside WithInstanceSelection by the same multi-instance route
+// middleware. A tool handler that needs to generate an embedding
+// server-side (rather than accept a caller-supplied vector) reads this back
+// via GetEmbeddingConfig to build its ai.text.embed call.
+func WithEmbeddingConfig(ctx context.Context, cfg *config.EmbeddingConfig) context.Context {
+	return context.WithValue(ctx, embeddingConfigKey, cfg)
+}
+
+// GetEmbeddingConfig retrieves the selected instance's embedding provider
+// configuration from the context. ok is false when no instance is selected,
+// or the selected instance has no Embedding configured.
+func GetEmbeddingConfig(ctx context.Context) (*config.EmbeddingConfig, bool) {
+	cfg, ok := ctx.Value(embeddingConfigKey).(*config.EmbeddingConfig)
+	return cfg, ok && cfg != nil
 }

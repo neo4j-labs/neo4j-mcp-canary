@@ -21,12 +21,14 @@ func LoadConfig(overrides CLIOverrides) (*Config, error) {
 	}
 
 	var fileValues map[string]string
+	var instances []NeoInstance
 	if configFilePath != "" {
-		values, err := loadConfigFile(configFilePath)
+		values, insts, err := loadConfigFile(configFilePath)
 		if err != nil {
 			return nil, err
 		}
 		fileValues = values
+		instances = insts
 	}
 
 	sources := []Source{
@@ -39,6 +41,10 @@ func LoadConfig(overrides CLIOverrides) (*Config, error) {
 	for _, f := range Fields() {
 		f.Setter(cfg, resolveField(f, sources...))
 	}
+	// Instances has no Field/Setter (see the comment on Config.Instances) —
+	// it's file-only by construction, so it's set directly here rather than
+	// through the CLI/env/file precedence chain the loop above resolves.
+	cfg.Instances = instances
 
 	// HTTPPort's default depends on HTTPTLSEnabled, which is only known once
 	// the loop above has resolved it — this can't be expressed as a per-field
@@ -70,6 +76,12 @@ func LoadConfig(overrides CLIOverrides) (*Config, error) {
 		return nil, fmt.Errorf("invalid tool categories header name: explicitly configured header name cannot be empty; unset NEO4J_MCP_HTTP_TOOL_CATEGORIES_HEADER_NAME or provide a valid header name")
 	}
 	cfg.HTTPToolCategoriesHeaderName = toolCategoriesHeaderName
+
+	apiKeyHeaderName := strings.TrimSpace(cfg.HTTPAPIKeyHeaderName)
+	if apiKeyHeaderName == "" {
+		return nil, fmt.Errorf("invalid API key header name: explicitly configured header name cannot be empty; unset NEO4J_MCP_HTTP_API_KEY_HEADER_NAME or provide a valid header name")
+	}
+	cfg.HTTPAPIKeyHeaderName = apiKeyHeaderName
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err

@@ -30,6 +30,12 @@ export NEO4J_TELEMETRY="true"               # Default: true
 export NEO4J_LOG_LEVEL="info"               # Default: info
 export NEO4J_LOG_FORMAT="text"              # Default: text
 export NEO4J_SCHEMA_SAMPLE_SIZE="100"       # Default: 100
+
+# Optional: lets set-vector-property's `text` field / check-embedding-dimensions
+# generate embeddings server-side via Neo4j's GenAI plugin. Required keys vary
+# by provider — see docs/MULTI_INSTANCE.md#embedding-provider-optional.
+export NEO4J_MCP_EMBEDDING_PROVIDER="openai"
+export NEO4J_MCP_EMBEDDING_CONFIGURATION="token=sk-xxx,model=text-embedding-3-small"
 ```
 
 ### HTTP Mode

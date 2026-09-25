@@ -3,7 +3,10 @@ module github.com/neo4j-labs/neo4j-mcp-canary
 go 1.26.6
 
 require (
+	github.com/MicahParks/jwkset v0.11.3
+	github.com/MicahParks/keyfunc/v3 v3.8.2
 	github.com/denisbrodbeck/machineid v1.0.1
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/jsonschema-go v0.4.3
 	github.com/google/uuid v1.6.0
 	github.com/mixpanel/mixpanel-go v1.2.1

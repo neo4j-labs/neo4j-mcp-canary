@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 type TransportMode string
@@ -134,17 +135,79 @@ type Config struct {
 	AllowUnauthenticatedToolsList               bool          // If true, allows unauthenticated tools list in HTTP mode
 	AllowUnauthenticatedInitialize              bool          // If true, allows unauthenticated initialize in HTTP mode
 	AllowUnauthenticatedNotificationsInitialize bool          // If true, allows unauthenticated initialize notifications in HTTP mode
+	HTTPAPIKeyHeaderName                        string        // HTTP header name a client presents a static API key in, for neo4j_instances entries with auth.type=basic (default: "X-Neo4j-MCP-Api-Key")
+
+	// Instances configures multi-instance HTTP mode: each entry names a
+	// Neo4j instance and its own connection/auth details, and a client
+	// selects one by its Name via the request path ("/<name>/mcp" — see
+	// internal/server). Deliberately has no Fields()/schema.go entry: a
+	// list of objects can't be expressed as a flat CLI flag or env var, and
+	// this must be configurable only via the config file (see
+	// TestFields_MatchConfigStruct's exclusion list and
+	// internal/config/instances.go). Mutually exclusive with URI/Username/
+	// Password and only valid in HTTP transport mode — see Validate.
+	Instances []NeoInstance
+
+	// EmbeddingProvider/EmbeddingConfiguration configure a GenAI embedding
+	// provider for single-instance mode (STDIO or single-instance HTTP) —
+	// the top-level equivalent of a multi-instance NeoInstance's Embedding
+	// field, letting set-vector-property's `text` field and
+	// check-embedding-dimensions work outside multi-instance HTTP too. See
+	// EmbeddingConfig. Mutually exclusive with Instances — see Validate.
+	EmbeddingProvider string
+	// EmbeddingConfiguration holds provider-specific settings as
+	// comma-separated key=value pairs, e.g.
+	// "token=sk-xxx,model=text-embedding-3-small" — mirroring the
+	// EnabledTools/HTTPAllowedOrigins comma-list convention rather than
+	// introducing JSON parsing as a new pattern. See parseEmbeddingConfiguration.
+	EmbeddingConfiguration string
+}
+
+// parseEmbeddingConfiguration splits a comma-separated key=value list (see
+// Config.EmbeddingConfiguration) into a map. Splits each pair on the FIRST
+// "=" only, so a value itself containing "=" (e.g. base64 padding) is still
+// handled correctly; empty input yields an empty (non-nil) map. Errors on
+// any entry without an "=".
+func parseEmbeddingConfiguration(raw string) (map[string]string, error) {
+	out := map[string]string{}
+	if raw == "" {
+		return out, nil
+	}
+	for _, pair := range strings.Split(raw, ",") {
+		k, v, ok := strings.Cut(pair, "=")
+		if !ok {
+			return nil, fmt.Errorf("invalid embedding configuration entry %q: expected key=value", pair)
+		}
+		out[strings.TrimSpace(k)] = v
+	}
+	return out, nil
+}
+
+// EmbeddingConfig builds this Config's top-level EmbeddingConfig from
+// EmbeddingProvider/EmbeddingConfiguration, reusing the exact validation
+// (validateEmbeddingConfig, internal/config/instances.go) the
+// instance-level feature already uses, so provider/required-key rules
+// never drift between the two paths. Returns (nil, nil) when
+// EmbeddingProvider is unset — no provider configured is not an error.
+func (c *Config) EmbeddingConfig() (*EmbeddingConfig, error) {
+	if c.EmbeddingProvider == "" {
+		return nil, nil
+	}
+	configuration, err := parseEmbeddingConfiguration(c.EmbeddingConfiguration)
+	if err != nil {
+		return nil, err
+	}
+	embConf := EmbeddingConfig{Provider: EmbeddingProvider(c.EmbeddingProvider), Configuration: configuration}
+	if err := validateEmbeddingConfig(embConf); err != nil {
+		return nil, err
+	}
+	return &embConf, nil
 }
 
 // Validate validates the configuration and returns an error if invalid
 func (c *Config) Validate() error {
 	if c == nil {
 		return fmt.Errorf("configuration is required but was nil")
-	}
-
-	// URI is always required
-	if c.URI == "" {
-		return fmt.Errorf("Neo4j URI is required but was empty")
 	}
 
 	// Default to stdio if not provided (maintains backward compatibility with tests constructing Config directly)
@@ -157,17 +220,42 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid transport mode '%s', must be one of %v", c.TransportMode, ValidTransportModes)
 	}
 
-	// For STDIO mode, require username and password from environment
-	// For HTTP mode, credentials come from per-request Basic Auth headers
-	if c.TransportMode == TransportModeStdio {
-		if c.Username == "" {
-			return fmt.Errorf("Neo4j username is required for STDIO mode")
+	if len(c.Instances) > 0 {
+		// Multi-instance mode replaces the single URI/Username/Password
+		// target entirely — each instance carries its own connection
+		// details (see internal/config/instances.go) — and only makes
+		// sense for stateless per-request HTTP calls, not a single
+		// long-lived STDIO connection.
+		if c.TransportMode != TransportModeHTTP {
+			return fmt.Errorf("neo4j_instances is only supported when the transport mode is 'http'")
 		}
-		if c.Password == "" {
-			return fmt.Errorf("Neo4j password is required for STDIO mode")
+		if c.URI != "" || c.Username != "" || c.Password != "" {
+			return fmt.Errorf("neo4j_instances cannot be combined with neo4j_uri/neo4j_username/neo4j_password; configure connection details per instance instead")
 		}
-	} else if c.Username != "" || c.Password != "" {
-		return fmt.Errorf("Neo4j username and password should not be set for HTTP transport mode; credentials are provided per-request via Basic Auth headers")
+		if err := ValidateInstances(c.Instances); err != nil {
+			return err
+		}
+		if c.EmbeddingProvider != "" || c.EmbeddingConfiguration != "" {
+			return fmt.Errorf("neo4j_instances cannot be combined with a top-level embedding provider; configure embedding per instance instead")
+		}
+	} else {
+		// URI is always required in single-instance mode
+		if c.URI == "" {
+			return fmt.Errorf("Neo4j URI is required but was empty")
+		}
+
+		// For STDIO mode, require username and password from environment
+		// For HTTP mode, credentials come from per-request Basic Auth headers
+		if c.TransportMode == TransportModeStdio {
+			if c.Username == "" {
+				return fmt.Errorf("Neo4j username is required for STDIO mode")
+			}
+			if c.Password == "" {
+				return fmt.Errorf("Neo4j password is required for STDIO mode")
+			}
+		} else if c.Username != "" || c.Password != "" {
+			return fmt.Errorf("Neo4j username and password should not be set for HTTP transport mode; credentials are provided per-request via Basic Auth headers")
+		}
 	}
 
 	// For HTTP mode with TLS enabled, require certificate and key files
@@ -184,6 +272,12 @@ func (c *Config) Validate() error {
 		if _, err := tls.LoadX509KeyPair(c.HTTPTLSCertFile, c.HTTPTLSKeyFile); err != nil {
 			return fmt.Errorf("failed to load TLS certificate and key: %w", err)
 		}
+	}
+
+	// Fail fast on a malformed/invalid embedding provider config at
+	// startup, rather than surfacing it only at first tool call.
+	if _, err := c.EmbeddingConfig(); err != nil {
+		return fmt.Errorf("invalid embedding configuration: %w", err)
 	}
 
 	return nil

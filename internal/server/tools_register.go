@@ -350,6 +350,14 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 			},
 			readonly: false,
 		},
+		{
+			Category: tools.CategorySearch,
+			definition: mcpsdk.ServerTool{
+				Tool:    search.CheckEmbeddingDimensionsSpec(),
+				Handler: search.CheckEmbeddingDimensionsHandler(deps),
+			},
+			readonly: true,
+		},
 		// Add other categories below...
 	}
 }

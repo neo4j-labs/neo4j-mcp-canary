@@ -96,6 +96,84 @@ func TestConfig_Validate(t *testing.T) {
 			wantErr: true,
 			errMsg:  "Neo4j username and password should not be set for HTTP transport mode; credentials are provided per-request via Basic Auth headers",
 		},
+		{
+			name: "valid instances config in HTTP mode",
+			cfg: &Config{
+				Telemetry:     true,
+				TransportMode: TransportModeHTTP,
+				Instances:     []NeoInstance{validBasicInstance("prod")},
+			},
+			wantErr: false,
+		},
+		{
+			name: "instances config in STDIO mode should raise error",
+			cfg: &Config{
+				Telemetry:     true,
+				TransportMode: TransportModeStdio,
+				Instances:     []NeoInstance{validBasicInstance("prod")},
+			},
+			wantErr: true,
+			errMsg:  "neo4j_instances is only supported when the transport mode is 'http'",
+		},
+		{
+			name: "instances combined with top-level URI should raise error",
+			cfg: &Config{
+				Telemetry:     true,
+				TransportMode: TransportModeHTTP,
+				URI:           "bolt://localhost:7687",
+				Instances:     []NeoInstance{validBasicInstance("prod")},
+			},
+			wantErr: true,
+			errMsg:  "neo4j_instances cannot be combined with neo4j_uri/neo4j_username/neo4j_password",
+		},
+		{
+			name: "invalid instances config surfaces ValidateInstances error",
+			cfg: &Config{
+				Telemetry:     true,
+				TransportMode: TransportModeHTTP,
+				Instances: []NeoInstance{{
+					Name: "prod", URI: "neo4j://x:7687",
+					Auth: InstanceAuth{Type: InstanceAuthBasic},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "requires auth.username and auth.password",
+		},
+		{
+			name: "valid top-level embedding config in STDIO mode",
+			cfg: &Config{
+				Telemetry:              true,
+				URI:                    "bolt://localhost:7687",
+				Username:               "neo4j",
+				Password:               "password",
+				EmbeddingProvider:      "openai",
+				EmbeddingConfiguration: "token=sk-test,model=text-embedding-3-small",
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid top-level embedding config surfaces EmbeddingConfig error",
+			cfg: &Config{
+				Telemetry:         true,
+				URI:               "bolt://localhost:7687",
+				Username:          "neo4j",
+				Password:          "password",
+				EmbeddingProvider: "not-a-real-provider",
+			},
+			wantErr: true,
+			errMsg:  "invalid embedding configuration",
+		},
+		{
+			name: "instances combined with top-level embedding provider should raise error",
+			cfg: &Config{
+				Telemetry:         true,
+				TransportMode:     TransportModeHTTP,
+				Instances:         []NeoInstance{validBasicInstance("prod")},
+				EmbeddingProvider: "openai",
+			},
+			wantErr: true,
+			errMsg:  "neo4j_instances cannot be combined with a top-level embedding provider",
+		},
 	}
 
 	for _, tt := range tests {
@@ -924,6 +1002,113 @@ func TestLoadConfig_SchemaSampleSize(t *testing.T) {
 		}
 		if cfg.SchemaSampleSize != DefaultSchemaSampleSize {
 			t.Errorf("SchemaSampleSize = %d, want %d (default after parse error)", cfg.SchemaSampleSize, DefaultSchemaSampleSize)
+		}
+	})
+}
+
+func TestParseEmbeddingConfiguration(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    map[string]string
+		wantErr string
+	}{
+		{name: "empty string yields empty map", raw: "", want: map[string]string{}},
+		{
+			name: "single pair",
+			raw:  "token=sk-test",
+			want: map[string]string{"token": "sk-test"},
+		},
+		{
+			name: "multiple pairs",
+			raw:  "token=sk-test,model=text-embedding-3-small",
+			want: map[string]string{"token": "sk-test", "model": "text-embedding-3-small"},
+		},
+		{
+			name: "value containing an equals sign is preserved (split on first = only)",
+			raw:  "token=sk-test==padding",
+			want: map[string]string{"token": "sk-test==padding"}, // #nosec G101 -- test fixture, not a real secret
+		},
+		{
+			name:    "entry without an equals sign is an error",
+			raw:     "token",
+			wantErr: `invalid embedding configuration entry "token": expected key=value`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseEmbeddingConfiguration(tt.raw)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("parseEmbeddingConfiguration() error = %v, want error containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseEmbeddingConfiguration() unexpected error: %v", err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("parseEmbeddingConfiguration() = %v, want %v", got, tt.want)
+			}
+			for k, v := range tt.want {
+				if got[k] != v {
+					t.Errorf("parseEmbeddingConfiguration()[%q] = %q, want %q", k, got[k], v)
+				}
+			}
+		})
+	}
+}
+
+func TestConfig_EmbeddingConfig(t *testing.T) {
+	t.Run("no provider configured returns nil, nil", func(t *testing.T) {
+		cfg := &Config{}
+		got, err := cfg.EmbeddingConfig()
+		if err != nil {
+			t.Fatalf("EmbeddingConfig() unexpected error: %v", err)
+		}
+		if got != nil {
+			t.Errorf("EmbeddingConfig() = %+v, want nil", got)
+		}
+	})
+
+	t.Run("valid provider and configuration", func(t *testing.T) {
+		cfg := &Config{
+			EmbeddingProvider:      "openai",
+			EmbeddingConfiguration: "token=sk-test,model=text-embedding-3-small",
+		}
+		got, err := cfg.EmbeddingConfig()
+		if err != nil {
+			t.Fatalf("EmbeddingConfig() unexpected error: %v", err)
+		}
+		if got == nil {
+			t.Fatal("EmbeddingConfig() = nil, want a configured EmbeddingConfig")
+		}
+		if got.Provider != EmbeddingProviderOpenAI {
+			t.Errorf("Provider = %q, want openai", got.Provider)
+		}
+		if got.Configuration["token"] != "sk-test" || got.Configuration["model"] != "text-embedding-3-small" {
+			t.Errorf("Configuration = %v, want token=sk-test model=text-embedding-3-small", got.Configuration)
+		}
+	})
+
+	t.Run("unknown provider is rejected", func(t *testing.T) {
+		cfg := &Config{EmbeddingProvider: "not-a-real-provider"}
+		if _, err := cfg.EmbeddingConfig(); err == nil {
+			t.Fatal("EmbeddingConfig() expected an error for an unknown provider, got nil")
+		}
+	})
+
+	t.Run("missing required key is rejected", func(t *testing.T) {
+		cfg := &Config{EmbeddingProvider: "openai", EmbeddingConfiguration: "token=sk-test"}
+		if _, err := cfg.EmbeddingConfig(); err == nil {
+			t.Fatal("EmbeddingConfig() expected an error for a missing required key (model), got nil")
+		}
+	})
+
+	t.Run("malformed configuration string is rejected", func(t *testing.T) {
+		cfg := &Config{EmbeddingProvider: "openai", EmbeddingConfiguration: "not-key-value"}
+		if _, err := cfg.EmbeddingConfig(); err == nil {
+			t.Fatal("EmbeddingConfig() expected an error for a malformed configuration string, got nil")
 		}
 	})
 }

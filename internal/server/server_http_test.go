@@ -257,3 +257,45 @@ func TestBuildTLSConfig(t *testing.T) {
 		})
 	}
 }
+
+// TestNewNeo4jMCPServer_EmbeddingConfig verifies NewNeo4jMCPServer computes
+// embeddingConfig from Config.EmbeddingProvider/EmbeddingConfiguration once
+// at construction, for single-instance mode (STDIO's Start and HTTP mode's
+// embeddingConfigMiddleware both read it from there rather than
+// recomputing per use).
+func TestNewNeo4jMCPServer_EmbeddingConfig(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockDB := db.NewMockService(ctrl)
+	analyticsService := analytics.NewMockService(ctrl)
+	analyticsService.EXPECT().NewStartupEvent(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	analyticsService.EXPECT().EmitEvent(gomock.Any()).AnyTimes()
+
+	t.Run("no provider configured", func(t *testing.T) {
+		cfg := &config.Config{
+			URI: "bolt://test-host:7687", Username: "u", Password: "p", Database: "neo4j",
+			TransportMode: config.TransportModeStdio,
+		}
+		srv := NewNeo4jMCPServer("test-version", cfg, mockDB, analyticsService)
+		if srv.embeddingConfig != nil {
+			t.Errorf("embeddingConfig = %+v, want nil", srv.embeddingConfig)
+		}
+	})
+
+	t.Run("provider configured", func(t *testing.T) {
+		cfg := &config.Config{
+			URI: "bolt://test-host:7687", Username: "u", Password: "p", Database: "neo4j",
+			TransportMode:          config.TransportModeStdio,
+			EmbeddingProvider:      "openai",
+			EmbeddingConfiguration: "token=sk-test,model=text-embedding-3-small",
+		}
+		srv := NewNeo4jMCPServer("test-version", cfg, mockDB, analyticsService)
+		if srv.embeddingConfig == nil {
+			t.Fatal("embeddingConfig = nil, want a configured EmbeddingConfig")
+		}
+		if srv.embeddingConfig.Provider != config.EmbeddingProviderOpenAI {
+			t.Errorf("Provider = %q, want openai", srv.embeddingConfig.Provider)
+		}
+	})
+}

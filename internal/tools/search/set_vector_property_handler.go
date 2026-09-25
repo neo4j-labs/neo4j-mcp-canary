@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/auth"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 )
@@ -48,30 +49,15 @@ func handleSetVectorProperty(ctx context.Context, request *mcpsdk.CallToolReques
 	if args.VectorProperty == "" {
 		return mcpsdk.NewToolResultError("vectorProperty is required and cannot be empty"), nil
 	}
-	if len(args.Vector) == 0 {
-		return mcpsdk.NewToolResultError("vector is required and cannot be empty"), nil
+	hasVector := len(args.Vector) > 0
+	hasText := args.Text != ""
+	if hasVector == hasText {
+		return mcpsdk.NewToolResultError("exactly one of vector or text is required"), nil
 	}
 
 	whereClause, filterParams, err := buildFilterClauses(varName, args.Filters)
 	if err != nil {
 		return mcpsdk.NewToolResultError(err.Error()), nil
-	}
-
-	procedure := "db.create.setNodeVectorProperty"
-	if args.EntityType == "RELATIONSHIP" {
-		procedure = "db.create.setRelationshipVectorProperty"
-	}
-
-	var cypherBuilder strings.Builder
-	fmt.Fprintf(&cypherBuilder, "MATCH %s\n", pattern)
-	fmt.Fprintf(&cypherBuilder, "WHERE %s\n", whereClause)
-	fmt.Fprintf(&cypherBuilder, "CALL %s(%s, $vectorProperty, $vector)\n", procedure, varName)
-	fmt.Fprintf(&cypherBuilder, "RETURN count(%s) AS updated", varName)
-	cypherStr := cypherBuilder.String()
-
-	params := map[string]any{"vectorProperty": args.VectorProperty, "vector": args.Vector}
-	for k, v := range filterParams {
-		params[k] = v
 	}
 
 	execCtx := ctx
@@ -80,6 +66,52 @@ func handleSetVectorProperty(ctx context.Context, request *mcpsdk.CallToolReques
 		execCtx, cancel = context.WithTimeout(ctx, deps.CypherTimeout)
 		defer cancel()
 	}
+
+	vector := args.Vector
+	if hasText {
+		embConf, ok := auth.GetEmbeddingConfig(ctx)
+		if !ok {
+			return mcpsdk.NewToolResultError("text was supplied but the connected Neo4j instance has no embedding provider configured; compute the vector yourself and pass it via vector instead"), nil
+		}
+		generated, err := generateEmbedding(execCtx, deps, args.Text, embConf)
+		if err != nil {
+			slog.Error("failed to generate embedding", "error", err)
+			return mcpsdk.NewToolResultError(err.Error()), nil
+		}
+		vector = generated
+	}
+
+	// Checked for both vector and text: SHOW INDEXES exposes a vector
+	// index's configured dimensions (see vectorIndexDimensionsByLabelOrType),
+	// so a mismatch is caught here with a clear error instead of surfacing
+	// later as a confusing failure at search time. A property with no
+	// vector index yet simply skips this check (found=false).
+	if dims, found, err := vectorIndexDimensionsByLabelOrType(execCtx, deps, args.EntityType, labelOrType, args.VectorProperty); err != nil {
+		slog.Error("failed to look up vector index dimensions", "error", err)
+		return mcpsdk.NewToolResultError(err.Error()), nil
+	} else if found && int64(len(vector)) != dims {
+		return mcpsdk.NewToolResultError(fmt.Sprintf(
+			"vector has %d dimensions but the vector index on %s.%s expects %d",
+			len(vector), labelOrType, args.VectorProperty, dims,
+		)), nil
+	}
+
+	procedure := "db.create.setNodeVectorProperty"
+	if args.EntityType == "RELATIONSHIP" {
+		procedure = "db.create.setRelationshipVectorProperty"
+	}
+
+	params := map[string]any{"vectorProperty": args.VectorProperty, "vector": vector}
+	for k, v := range filterParams {
+		params[k] = v
+	}
+
+	var cypherBuilder strings.Builder
+	fmt.Fprintf(&cypherBuilder, "MATCH %s\n", pattern)
+	fmt.Fprintf(&cypherBuilder, "WHERE %s\n", whereClause)
+	fmt.Fprintf(&cypherBuilder, "CALL %s(%s, $vectorProperty, $vector)\n", procedure, varName)
+	fmt.Fprintf(&cypherBuilder, "RETURN count(%s) AS updated", varName)
+	cypherStr := cypherBuilder.String()
 
 	slog.Info("setting vector property", "entityType", args.EntityType, "vectorProperty", args.VectorProperty)
 
