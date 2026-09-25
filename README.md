@@ -130,7 +130,7 @@ The Neo4j MCP Canary server supports two communication transport modes
 | Credentials          | Set via environment variables                              | Per-request via Bearer token or Basic Auth headers                         |
 | Telemetry            | Collects Neo4j version, edition, Cypher version at startup | Reports `unknown-http-mode` — per-request credentials prevent introspection |
 
-See the [Client Setup Guide](docs/CLIENT_SETUP.md) for configuration instructions for both modes.
+See the [Client Setup Guide](docs/CLIENT_SETUP.md) for configuration instructions for both modes. HTTP mode also supports an alternative **multi-instance** configuration, where one server fronts several Neo4j instances at once — see [docs/MULTI_INSTANCE.md](docs/MULTI_INSTANCE.md).
 
 ## Unauthenticated MCP Client Requests
 
@@ -325,7 +325,9 @@ neo4j_http_tls_enabled: true
 neo4j_cypher_max_rows: 500
 ```
 
-The equivalent JSON is also accepted (`.json` extension). Only scalar values (strings, numbers, booleans) are supported — a nested object or list is a startup error. Values from CLI flags or environment variables always take precedence over the config file; a `--config-file` that fails to read or parse is a startup error.
+The equivalent JSON is also accepted (`.json` extension). Only scalar values (strings, numbers, booleans) are supported for every key except one — a nested object or list under any other key is a startup error. Values from CLI flags or environment variables always take precedence over the config file; a `--config-file` that fails to read or parse is a startup error.
+
+The one exception is `neo4j_instances`, a list of Neo4j instance definitions that turns on **multi-instance HTTP mode**, letting one server front several Neo4j instances at once, each reachable at its own URL path. It's configurable only via the config file — see [docs/MULTI_INSTANCE.md](docs/MULTI_INSTANCE.md) for the full config shape, per-instance auth types, and how a client selects an instance.
 
 Adding a new configuration parameter to the server (env var + CLI flag + config-file key, all at once) means adding one entry to the `fields` slice in [`internal/config/schema.go`](internal/config/schema.go) — see that file's doc comments for the shape.
 
@@ -424,7 +426,7 @@ The planner-estimate guard reads the root `EstimatedRows` of an `EXPLAIN` plan b
 
 ## Authentication Methods (HTTP Mode)
 
-When using HTTP transport mode, the Neo4j MCP Canary server supports two authentication methods to accommodate different deployment scenarios.
+When using HTTP transport mode, the Neo4j MCP Canary server supports two authentication methods to accommodate different deployment scenarios. (This section covers single-instance HTTP mode; multi-instance mode has its own per-instance auth types, including server-verified Bearer tokens — see [docs/MULTI_INSTANCE.md](docs/MULTI_INSTANCE.md).)
 
 ### Bearer Token Authentication
 
