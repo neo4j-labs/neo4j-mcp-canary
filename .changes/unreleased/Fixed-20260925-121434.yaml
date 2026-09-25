@@ -1,3 +1,0 @@
-kind: Fixed
-body: 'Tool output schemas for read-cypher, write-cypher, list-constraints-and-indexes, get-schema, create-index, and create-constraint declared nullable array/object fields (e.g. rows, constraints, indexes, labelsOrTypes) using JSON Schema''s "type": ["null", "array"] form. That''s legal JSON Schema, but some MCP clients map tool schemas onto a single-type dialect (such as the OpenAPI subset used for Gemini function declarations) and either reject the tool or silently drop the constraint. Every such field now uses the equivalent, more portable "anyOf": [{"type": "null"}, {"type": "array"}] form instead.'
-time: 2026-09-25T12:14:34.842554+01:00
