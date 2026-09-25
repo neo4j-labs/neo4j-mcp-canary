@@ -26,7 +26,7 @@ const (
 	// InstanceAuthBasicPassthrough forwards the calling client's own HTTP
 	// Basic Auth credentials to Neo4j as-is (the same behavior single-
 	// instance HTTP mode has always had), scoped to this one instance.
-	InstanceAuthBasicPassthrough InstanceAuthType = "basic_passthrough"
+	InstanceAuthBasicPassthrough InstanceAuthType = "basic_passthrough" // #nosec G101 -- an auth-type identifier, not a credential
 	// InstanceAuthBearer verifies the calling client's Bearer token (issuer,
 	// audience, signature, expiry) against Auth.Issuer/JWKSURI/Audience,
 	// then forwards the same token to Neo4j.

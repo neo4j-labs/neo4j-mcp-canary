@@ -90,7 +90,11 @@ func main() {
 		verifiers, err := oidc.NewVerifierRegistry(ctx, cfg.Instances)
 		if err != nil {
 			slog.Error("Failed to initialize Bearer token verification", "error", err)
-			os.Exit(1)
+			// os.Exit skips already-registered defers, so the driver cleanup
+			// above is run explicitly here rather than relying on the
+			// deferred call.
+			cleanup()
+			os.Exit(1) //nolint:gocritic // cleanup() is called explicitly on the line above; this linter can't see that
 		}
 		mcpServer.SetBearerVerifier(verifiers.VerifyBearer)
 	}

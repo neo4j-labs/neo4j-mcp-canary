@@ -54,7 +54,7 @@ func TestMultiInstanceHTTP_RoutingAndAuth(t *testing.T) {
 		"staging": stagingDB,
 	})
 
-	cfg := &config.Config{
+	cfg := &config.Config{ // #nosec G101 -- test fixture credentials, not real secrets
 		TransportMode:                config.TransportModeHTTP,
 		HTTPHost:                     "127.0.0.1",
 		HTTPPort:                     strconv.Itoa(port),
