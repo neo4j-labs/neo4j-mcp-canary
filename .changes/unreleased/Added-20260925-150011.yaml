@@ -1,3 +1,0 @@
-kind: Added
-body: STDIO and single-instance HTTP mode can now configure a GenAI embedding provider too, via the NEO4J_MCP_EMBEDDING_PROVIDER/NEO4J_MCP_EMBEDDING_CONFIGURATION environment variables (or their --neo4j-mcp-embedding-* CLI flags) — the same set-vector-property text field and check-embedding-dimensions tool that previously only worked in multi-instance HTTP mode now work everywhere.
-time: 2026-09-25T15:00:11.070914+01:00
