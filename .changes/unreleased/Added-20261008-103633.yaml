@@ -1,0 +1,3 @@
+kind: Added
+body: Sends back redacted path and binary name of the process that started this mcp server
+time: 2026-10-08T10:36:33.63058+02:00
