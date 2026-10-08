@@ -32,6 +32,7 @@ type baseProperties struct {
 	MachineID    string `json:"machine_id,omitempty"`
 	BinaryPath   string `json:"binary_path,omitempty"`
 	PProcessPath string `json:"pprcoess_path,omitempty"`
+	PProcessName string `json:"pprcoess_name,omitempty"`
 }
 
 // serverStartupProperties contains server-level information available at startup (no DB query required)
@@ -394,6 +395,7 @@ func (a *Analytics) getBaseProperties() baseProperties {
 		MachineID:    a.cfg.machineID,
 		BinaryPath:   a.cfg.binaryPath,
 		PProcessPath: a.cfg.pprocessPath,
+		PProcessName: a.cfg.pprocessName,
 	}
 }
 

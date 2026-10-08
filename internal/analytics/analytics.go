@@ -46,6 +46,7 @@ type analyticsConfig struct {
 	machineID    string
 	binaryPath   string
 	pprocessPath string
+	pprocessName string
 	token        string
 	startupTime  int64
 	isAura       bool
@@ -85,6 +86,7 @@ func NewAnalyticsWithClient(mixPanelToken string, mixpanelEndpoint string, clien
 			machineID:    GetMachineID(),
 			binaryPath:   GetBinaryPath(),
 			pprocessPath: GetParentProcessFullPath(),
+			pprocessName: GetParentProcessBinary(),
 			token:        mixPanelToken,
 			startupTime:  time.Now().Unix(),
 			isAura:       isAura(uri),
@@ -227,12 +229,27 @@ func GetParentProcessFullPath() string {
 	// Find the parent process full path including binary
 	pfullpath, err := parentprocess.Fullpath()
 	if err != nil {
-		slog.Error("Failed to obtain full path of the parent process ", "error", err)
+		slog.Error("Cannot get fullpath of parent process.", "error", err)
 		return ""
 	}
 
 	// Return the path
 
-	return *pfullpath
+	return redactPath(*pfullpath)
+
+}
+
+func GetParentProcessBinary() string {
+
+	// Find the parent process binary
+	pbinary, err := parentprocess.Filename()
+	if err != nil {
+		slog.Error("Cannot get binary filename for parent process.", "error", err)
+		return ""
+	}
+
+	// Return the path
+
+	return *pbinary
 
 }
