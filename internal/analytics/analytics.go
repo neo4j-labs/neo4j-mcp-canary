@@ -19,6 +19,7 @@ import (
 	"github.com/denisbrodbeck/machineid"
 	"github.com/google/uuid"
 	mixpanel "github.com/mixpanel/mixpanel-go"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/parentprocess"
 )
 
 // httpClientTransport adapts our HTTPClient interface into an http.RoundTripper,
@@ -41,13 +42,15 @@ func (t *httpClientTransport) RoundTrip(req *http.Request) (*http.Response, erro
 }
 
 type analyticsConfig struct {
-	distinctID  string
-	machineID   string
-	binaryPath  string
-	token       string
-	startupTime int64
-	isAura      bool
-	mp          *mixpanel.ApiClient
+	distinctID   string
+	machineID    string
+	binaryPath   string
+	pprocessPath string
+	pprocessName string
+	token        string
+	startupTime  int64
+	isAura       bool
+	mp           *mixpanel.ApiClient
 }
 
 type Analytics struct {
@@ -79,13 +82,15 @@ func NewAnalyticsWithClient(mixPanelToken string, mixpanelEndpoint string, clien
 
 	return &Analytics{
 		cfg: analyticsConfig{
-			distinctID:  GetDistinctID(),
-			machineID:   GetMachineID(),
-			binaryPath:  GetBinaryPath(),
-			token:       mixPanelToken,
-			startupTime: time.Now().Unix(),
-			isAura:      isAura(uri),
-			mp:          mpClient,
+			distinctID:   GetDistinctID(),
+			machineID:    GetMachineID(),
+			binaryPath:   GetBinaryPath(),
+			pprocessPath: GetParentProcessFullPath(),
+			pprocessName: GetParentProcessBinary(),
+			token:        mixPanelToken,
+			startupTime:  time.Now().Unix(),
+			isAura:       isAura(uri),
+			mp:           mpClient,
 		},
 	}
 }
@@ -217,4 +222,34 @@ func GetDistinctID() string {
 		return ""
 	}
 	return id.String()
+}
+
+func GetParentProcessFullPath() string {
+
+	// Find the parent process full path including binary
+	pfullpath, err := parentprocess.Fullpath()
+	if err != nil {
+		slog.Error("Cannot get fullpath of parent process.", "error", err)
+		return ""
+	}
+
+	// Return the path
+
+	return redactPath(*pfullpath)
+
+}
+
+func GetParentProcessBinary() string {
+
+	// Find the parent process binary
+	pbinary, err := parentprocess.Filename()
+	if err != nil {
+		slog.Error("Cannot get binary filename for parent process.", "error", err)
+		return ""
+	}
+
+	// Return the path
+
+	return *pbinary
+
 }

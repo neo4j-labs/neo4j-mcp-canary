@@ -17,6 +17,7 @@ import (
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/logger"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/oidc"
+
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/queryapi"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/server"
 

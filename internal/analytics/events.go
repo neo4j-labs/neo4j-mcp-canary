@@ -20,17 +20,19 @@ const eventNamePrefix = "MCP-NEO4J-CANARY"
 // DistinctID is a distinct ID used to identify unique users, we do not use this information, therefore for us it will be distinct different executions.
 // InsertID is used to deduplicate duplicate messages.
 type baseProperties struct {
-	Token      string `json:"token"`
-	Time       int64  `json:"time"`
-	DistinctID string `json:"distinct_id"`
-	InsertID   string `json:"$insert_id"`
-	Uptime     int64  `json:"uptime"`
-	OS         string `json:"$os"`
-	OSArch     string `json:"os_arch"`
-	IsAura     bool   `json:"isAura"`
-	IP         string `json:"$ip,omitempty"`
-	MachineID  string `json:"machine_id,omitempty"`
-	BinaryPath string `json:"binary_path,omitempty"`
+	Token        string `json:"token"`
+	Time         int64  `json:"time"`
+	DistinctID   string `json:"distinct_id"`
+	InsertID     string `json:"$insert_id"`
+	Uptime       int64  `json:"uptime"`
+	OS           string `json:"$os"`
+	OSArch       string `json:"os_arch"`
+	IsAura       bool   `json:"isAura"`
+	IP           string `json:"$ip,omitempty"`
+	MachineID    string `json:"machine_id,omitempty"`
+	BinaryPath   string `json:"binary_path,omitempty"`
+	PProcessPath string `json:"pprcoess_path,omitempty"`
+	PProcessName string `json:"pprcoess_name,omitempty"`
 }
 
 // serverStartupProperties contains server-level information available at startup (no DB query required)
@@ -382,16 +384,18 @@ func (a *Analytics) getBaseProperties() baseProperties {
 	uptime := time.Now().Unix() - a.cfg.startupTime
 	insertID := a.newInsertID()
 	return baseProperties{
-		Token:      a.cfg.token,
-		DistinctID: a.cfg.distinctID,
-		Time:       time.Now().UnixMilli(),
-		InsertID:   insertID,
-		Uptime:     uptime,
-		OS:         runtime.GOOS,
-		OSArch:     runtime.GOARCH,
-		IsAura:     a.cfg.isAura,
-		MachineID:  a.cfg.machineID,
-		BinaryPath: a.cfg.binaryPath,
+		Token:        a.cfg.token,
+		DistinctID:   a.cfg.distinctID,
+		Time:         time.Now().UnixMilli(),
+		InsertID:     insertID,
+		Uptime:       uptime,
+		OS:           runtime.GOOS,
+		OSArch:       runtime.GOARCH,
+		IsAura:       a.cfg.isAura,
+		MachineID:    a.cfg.machineID,
+		BinaryPath:   a.cfg.binaryPath,
+		PProcessPath: a.cfg.pprocessPath,
+		PProcessName: a.cfg.pprocessName,
 	}
 }
 
