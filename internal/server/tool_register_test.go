@@ -10,8 +10,10 @@ import (
 	analytics "github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics/mocks"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 	db "github.com/neo4j-labs/neo4j-mcp-canary/internal/database/mocks"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/server"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
@@ -28,6 +30,15 @@ func qualifyingSearchVersionRecord() []*neo4j.Record {
 			Values: []any{"Neo4j Kernel", "enterprise", []any{"2026.09.0"}},
 		},
 	}
+}
+
+// graphToolNames are the parameter-only tools of the graph, traversal and
+// patterns categories.
+var graphToolNames = map[string]bool{
+	"create-node": true, "find-nodes": true, "get-node": true, "update-node": true, "delete-node": true, "count-nodes": true,
+	"create-relationship": true, "find-relationships": true, "update-relationship": true, "delete-relationship": true,
+	"traverse": true, "expand-neighbors": true, "find-shortest-path": true, "find-all-paths": true,
+	"match-pattern": true, "find-common-connections": true, "find-motif": true, "find-relationship-chain": true, "find-subgraph": true,
 }
 
 func TestToolRegister(t *testing.T) {
@@ -58,8 +69,13 @@ func TestToolRegister(t *testing.T) {
 		// profile-cypher, list-constraints-and-indexes, create-constraint,
 		// drop-constraint, create-index, drop-index, list-gds-procedures,
 		// give-feedback, vector-search, fulltext-search, create-vector-index,
-		// create-fulltext-index, set-vector-property, check-embedding-dimensions
-		expectedTotalToolsCount := 18
+		// create-fulltext-index, set-vector-property, check-embedding-dimensions,
+		// create-node, find-nodes, get-node, update-node, delete-node, count-nodes,
+		// create-relationship, find-relationships, update-relationship,
+		// delete-relationship, traverse, expand-neighbors, find-shortest-path,
+		// find-all-paths, match-pattern, find-common-connections, find-motif,
+		// find-relationship-chain, find-subgraph
+		expectedTotalToolsCount := 37
 
 		err := s.Start()
 		if err != nil {
@@ -89,8 +105,11 @@ func TestToolRegister(t *testing.T) {
 		// update this number when a tool is added or removed.
 		// Readonly tools: get-schema, read-cypher, explain-cypher,
 		// list-constraints-and-indexes, list-gds-procedures, give-feedback,
-		// vector-search, fulltext-search, check-embedding-dimensions
-		expectedTotalToolsCount := 9
+		// vector-search, fulltext-search, check-embedding-dimensions, find-nodes,
+		// get-node, count-nodes, find-relationships, traverse, expand-neighbors,
+		// find-shortest-path, find-all-paths, match-pattern, find-common-connections,
+		// find-motif, find-relationship-chain, find-subgraph
+		expectedTotalToolsCount := 22
 
 		err := s.Start()
 		if err != nil {
@@ -122,8 +141,13 @@ func TestToolRegister(t *testing.T) {
 		// profile-cypher, list-constraints-and-indexes, create-constraint,
 		// drop-constraint, create-index, drop-index, list-gds-procedures,
 		// give-feedback, vector-search, fulltext-search, create-vector-index,
-		// create-fulltext-index, set-vector-property, check-embedding-dimensions
-		expectedTotalToolsCount := 18
+		// create-fulltext-index, set-vector-property, check-embedding-dimensions,
+		// create-node, find-nodes, get-node, update-node, delete-node, count-nodes,
+		// create-relationship, find-relationships, update-relationship,
+		// delete-relationship, traverse, expand-neighbors, find-shortest-path,
+		// find-all-paths, match-pattern, find-common-connections, find-motif,
+		// find-relationship-chain, find-subgraph
+		expectedTotalToolsCount := 37
 
 		err := s.Start()
 		if err != nil {
@@ -155,8 +179,9 @@ func TestToolRegister(t *testing.T) {
 		// profile-cypher, list-constraints-and-indexes, create-constraint,
 		// drop-constraint, create-index, drop-index, give-feedback,
 		// vector-search, fulltext-search, create-vector-index,
-		// create-fulltext-index, set-vector-property, check-embedding-dimensions
-		expectedTotalToolsCount := 17
+		// create-fulltext-index, set-vector-property, check-embedding-dimensions,
+		// plus the 19 graph, traversal and patterns tools
+		expectedTotalToolsCount := 36
 
 		err := s.Start()
 		if err != nil {
@@ -198,9 +223,81 @@ func TestToolRegister(t *testing.T) {
 		for _, searchTool := range []string{"vector-search", "fulltext-search", "create-vector-index", "create-fulltext-index", "set-vector-property", "check-embedding-dimensions"} {
 			assert.NotContains(t, toolNames, searchTool)
 		}
-		// Baseline count from before the search category existed — proves
-		// nothing else regressed, only the search tools were excluded.
+		// 12 pre-search tools plus the 19 graph/traversal/patterns tools,
+		// which only need Cypher 25 (calendar >= 2025.06) — proves only the
+		// search tools were excluded.
+		assert.Len(t, toolNames, 31)
+	})
+
+	t.Run("should remove graph, traversal and patterns tools if the server does not support Cypher 25", func(t *testing.T) {
+		mockDB := getMockedDBService(ctrl, true)
+		mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(2).Return([]*neo4j.Record{
+			{Keys: []string{"name", "edition", "versions"}, Values: []any{"Neo4j Kernel", "enterprise", []any{"2025.05.0"}}},
+		}, nil)
+		cfg := &config.Config{
+			URI:           "bolt://test-host:7687",
+			Username:      "neo4j",
+			Password:      "password",
+			Database:      "neo4j",
+			TransportMode: config.TransportModeStdio,
+		}
+		s := server.NewNeo4jMCPServer("test-version", cfg, mockDB, aService)
+
+		err := s.Start()
+		if err != nil {
+			t.Fatalf("Start() failed: %v", err)
+		}
+
+		toolNames := make([]string, 0, len(s.ListTools()))
+		for _, tool := range s.ListTools() {
+			toolNames = append(toolNames, tool.Name)
+		}
+		for _, graphTool := range []string{"create-node", "find-nodes", "traverse", "find-shortest-path", "match-pattern", "find-subgraph"} {
+			assert.NotContains(t, toolNames, graphTool)
+		}
+		// Only the 12 non-search, non-graph tools remain.
 		assert.Len(t, toolNames, 12)
+	})
+
+	t.Run("read-only registration matches each tool's ReadOnlyHint, and graph tools take no raw Cypher", func(t *testing.T) {
+		start := func(readOnly bool) []mcpsdk.Tool {
+			mockDB := getMockedDBService(ctrl, true)
+			mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), "CALL dbms.components()", gomock.Any()).Times(2).Return(qualifyingSearchVersionRecord(), nil)
+			cfg := &config.Config{
+				URI:           "bolt://test-host:7687",
+				Username:      "neo4j",
+				Password:      "password",
+				Database:      "neo4j",
+				ReadOnly:      readOnly,
+				TransportMode: config.TransportModeStdio,
+			}
+			s := server.NewNeo4jMCPServer("test-version", cfg, mockDB, aService)
+			if err := s.Start(); err != nil {
+				t.Fatalf("Start() failed: %v", err)
+			}
+			return s.ListTools()
+		}
+		readOnlyNames := map[string]bool{}
+		for _, tool := range start(true) {
+			readOnlyNames[tool.Name] = true
+			assert.True(t, tool.Annotations.ReadOnlyHint, "%s is registered in read-only mode but is not annotated read-only", tool.Name)
+		}
+		graphTools := 0
+		for _, tool := range start(false) {
+			assert.Equal(t, tool.Annotations.ReadOnlyHint, readOnlyNames[tool.Name], "%s: ReadOnlyHint disagrees with read-only registration", tool.Name)
+			if graphToolNames[tool.Name] {
+				graphTools++
+				schema, ok := tool.InputSchema.(*jsonschema.Schema)
+				if assert.True(t, ok, tool.Name) {
+					for _, forbidden := range []string{"query", "cypher", "statement", "params"} {
+						assert.NotContains(t, schema.Properties, forbidden, "%s must not accept raw Cypher", tool.Name)
+					}
+				}
+				assert.NotNil(t, tool.OutputSchema, "%s must advertise an output schema", tool.Name)
+				assert.NotEmpty(t, tool.Annotations.Title, "%s must have a title", tool.Name)
+			}
+		}
+		assert.Equal(t, len(graphToolNames), graphTools)
 	})
 
 	t.Run("should narrow registered tools by name via EnabledTools", func(t *testing.T) {

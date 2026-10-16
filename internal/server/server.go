@@ -59,6 +59,7 @@ type Neo4jMCPServer struct {
 	events                 *eventing.Emitter
 	gdsInstalled           bool
 	searchVersionSupported bool
+	cypher25Supported      bool
 	// embeddingConfig is the top-level GenAI embedding provider config for
 	// single-instance mode (STDIO or single-instance HTTP) — computed once
 	// from cfg.EmbeddingConfig() since it never varies per request, unlike
@@ -152,6 +153,7 @@ func (s *Neo4jMCPServer) Start() error {
 			}
 			s.gdsInstalled = result.GDSInstalled
 			s.searchVersionSupported = result.SearchVersionSupported
+			s.cypher25Supported = result.Cypher25Supported
 
 			// Register tools
 			if err := s.registerTools(); err != nil {
@@ -429,8 +431,9 @@ func (s *Neo4jMCPServer) verifyOnFirstRequest(ctx context.Context) {
 	}
 	s.gdsInstalled = result.GDSInstalled
 	s.searchVersionSupported = result.SearchVersionSupported
+	s.cypher25Supported = result.Cypher25Supported
 
-	if s.gdsInstalled || s.searchVersionSupported {
+	if s.gdsInstalled || s.searchVersionSupported || s.cypher25Supported {
 		s.reregisterOptionalTools()
 	}
 

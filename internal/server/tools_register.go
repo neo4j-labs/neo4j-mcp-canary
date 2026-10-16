@@ -13,7 +13,10 @@ import (
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/cypher"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/feedback"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/gds"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/graph"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/patterns"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/search"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/traversal"
 )
 
 // registerTools registers all enabled MCP tools and adds them to the provided MCP server.
@@ -83,6 +86,12 @@ func (s *Neo4jMCPServer) getEnabledTools() []mcpsdk.ServerTool {
 	// tools.
 	if !s.searchVersionSupported {
 		filters = append(filters, filterSearchTools)
+	}
+
+	// Graph-operation tools all emit Cypher 25; disable them on servers
+	// that predate it.
+	if !s.cypher25Supported {
+		filters = append(filters, filterCypher25Tools)
 	}
 
 	deps := s.buildToolDependencies()
@@ -179,6 +188,18 @@ func filterSearchTools(defs []ToolDefinition) []ToolDefinition {
 		}
 	}
 	return nonSearchTools
+}
+
+func filterCypher25Tools(defs []ToolDefinition) []ToolDefinition {
+	supported := make([]ToolDefinition, 0, len(defs))
+	for _, t := range defs {
+		switch t.Category {
+		case tools.CategoryGraph, tools.CategoryTraversal, tools.CategoryPatterns:
+		default:
+			supported = append(supported, t)
+		}
+	}
+	return supported
 }
 
 // buildToolDependencies creates a ToolDependencies with all config wired through.
@@ -359,5 +380,160 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 			readonly: true,
 		},
 		// Add other categories below...
+		// Graph-operation categories (graph, traversal, patterns) — parameter-only
+		// tools that emit Cypher 25; gated behind s.cypher25Supported via
+		// filterCypher25Tools (see getEnabledTools above).
+		{
+			Category: tools.CategoryGraph,
+			definition: mcpsdk.ServerTool{
+				Tool:    graph.CreateNodeSpec(),
+				Handler: graph.CreateNodeHandler(deps),
+			},
+			readonly: false,
+		},
+		{
+			Category: tools.CategoryGraph,
+			definition: mcpsdk.ServerTool{
+				Tool:    graph.FindNodesSpec(),
+				Handler: graph.FindNodesHandler(deps),
+			},
+			readonly: true,
+		},
+		{
+			Category: tools.CategoryGraph,
+			definition: mcpsdk.ServerTool{
+				Tool:    graph.GetNodeSpec(),
+				Handler: graph.GetNodeHandler(deps),
+			},
+			readonly: true,
+		},
+		{
+			Category: tools.CategoryGraph,
+			definition: mcpsdk.ServerTool{
+				Tool:    graph.UpdateNodeSpec(),
+				Handler: graph.UpdateNodeHandler(deps),
+			},
+			readonly: false,
+		},
+		{
+			Category: tools.CategoryGraph,
+			definition: mcpsdk.ServerTool{
+				Tool:    graph.DeleteNodeSpec(),
+				Handler: graph.DeleteNodeHandler(deps),
+			},
+			readonly: false,
+		},
+		{
+			Category: tools.CategoryGraph,
+			definition: mcpsdk.ServerTool{
+				Tool:    graph.CountNodesSpec(),
+				Handler: graph.CountNodesHandler(deps),
+			},
+			readonly: true,
+		},
+		{
+			Category: tools.CategoryGraph,
+			definition: mcpsdk.ServerTool{
+				Tool:    graph.CreateRelationshipSpec(),
+				Handler: graph.CreateRelationshipHandler(deps),
+			},
+			readonly: false,
+		},
+		{
+			Category: tools.CategoryGraph,
+			definition: mcpsdk.ServerTool{
+				Tool:    graph.FindRelationshipsSpec(),
+				Handler: graph.FindRelationshipsHandler(deps),
+			},
+			readonly: true,
+		},
+		{
+			Category: tools.CategoryGraph,
+			definition: mcpsdk.ServerTool{
+				Tool:    graph.UpdateRelationshipSpec(),
+				Handler: graph.UpdateRelationshipHandler(deps),
+			},
+			readonly: false,
+		},
+		{
+			Category: tools.CategoryGraph,
+			definition: mcpsdk.ServerTool{
+				Tool:    graph.DeleteRelationshipSpec(),
+				Handler: graph.DeleteRelationshipHandler(deps),
+			},
+			readonly: false,
+		},
+		{
+			Category: tools.CategoryTraversal,
+			definition: mcpsdk.ServerTool{
+				Tool:    traversal.TraverseSpec(),
+				Handler: traversal.TraverseHandler(deps),
+			},
+			readonly: true,
+		},
+		{
+			Category: tools.CategoryTraversal,
+			definition: mcpsdk.ServerTool{
+				Tool:    traversal.ExpandNeighborsSpec(),
+				Handler: traversal.ExpandNeighborsHandler(deps),
+			},
+			readonly: true,
+		},
+		{
+			Category: tools.CategoryTraversal,
+			definition: mcpsdk.ServerTool{
+				Tool:    traversal.FindShortestPathSpec(),
+				Handler: traversal.FindShortestPathHandler(deps),
+			},
+			readonly: true,
+		},
+		{
+			Category: tools.CategoryTraversal,
+			definition: mcpsdk.ServerTool{
+				Tool:    traversal.FindAllPathsSpec(),
+				Handler: traversal.FindAllPathsHandler(deps),
+			},
+			readonly: true,
+		},
+		{
+			Category: tools.CategoryPatterns,
+			definition: mcpsdk.ServerTool{
+				Tool:    patterns.MatchPatternSpec(),
+				Handler: patterns.MatchPatternHandler(deps),
+			},
+			readonly: true,
+		},
+		{
+			Category: tools.CategoryPatterns,
+			definition: mcpsdk.ServerTool{
+				Tool:    patterns.FindCommonConnectionsSpec(),
+				Handler: patterns.FindCommonConnectionsHandler(deps),
+			},
+			readonly: true,
+		},
+		{
+			Category: tools.CategoryPatterns,
+			definition: mcpsdk.ServerTool{
+				Tool:    patterns.FindMotifSpec(),
+				Handler: patterns.FindMotifHandler(deps),
+			},
+			readonly: true,
+		},
+		{
+			Category: tools.CategoryPatterns,
+			definition: mcpsdk.ServerTool{
+				Tool:    patterns.FindRelationshipChainSpec(),
+				Handler: patterns.FindRelationshipChainHandler(deps),
+			},
+			readonly: true,
+		},
+		{
+			Category: tools.CategoryPatterns,
+			definition: mcpsdk.ServerTool{
+				Tool:    patterns.FindSubgraphSpec(),
+				Handler: patterns.FindSubgraphHandler(deps),
+			},
+			readonly: true,
+		},
 	}
 }

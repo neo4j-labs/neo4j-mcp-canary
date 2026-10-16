@@ -38,7 +38,7 @@ In STDIO mode, the server verifies the following. If any check fails (e.g. inval
 In HTTP mode, startup verification checks are skipped because credentials come from per-request auth headers. The server starts immediately without connecting to Neo4j. The one exception is [Query API mode](#connecting-via-the-query-api-instead-of-bolt): its minimum-version check runs at startup in both transport modes, since it only needs an unauthenticated GET and doesn't depend on per-request credentials.
 
 **Optional Requirements**
-If an optional dependency is missing, the server starts in adaptive mode. For instance, if the Graph Data Science (GDS) library is not detected, the server still launches but automatically disables GDS-dependent tools such as `list-gds-procedures`. All other tools remain available.
+If an optional dependency is missing, the server starts in adaptive mode. For instance, if the Graph Data Science (GDS) library is not detected, the server still launches but automatically disables GDS-dependent tools such as `list-gds-procedures`. Likewise, the `graph`, `traversal` and `patterns` tools are disabled when the connected server does not support Cypher 25. All other tools remain available.
 
 ## Installation (Binary)
 
@@ -203,7 +203,7 @@ Core connection and behaviour:
 | `NEO4J_DATABASE`                     | `neo4j`   | Database name                                                                  |
 | `NEO4J_READ_ONLY`                    | `false`   | When `true`, the `write-cypher` tool is not registered                        |
 | `NEO4J_MCP_ENABLED_TOOLS`            | _(all)_   | Comma-separated tool names to enable; empty enables every tool                |
-| `NEO4J_MCP_ENABLED_TOOL_CATEGORIES`  | _(all)_   | Comma-separated categories (`cypher`, `gds`, `feedback`) to enable             |
+| `NEO4J_MCP_ENABLED_TOOL_CATEGORIES`  | _(all)_   | Comma-separated categories (`cypher`, `gds`, `feedback`, `search`, `graph`, `traversal`, `patterns`) to enable             |
 | `NEO4J_TELEMETRY`                    | `true`    | Enable/disable anonymous telemetry                                            |
 | `NEO4J_SCHEMA_SAMPLE_SIZE`           | `1000`    | Nodes per label APOC examines when inferring schema                           |
 | `NEO4J_LOG_LEVEL`                    | `info`    | `debug`, `info`, `notice`, `warning`, `error`, `critical`, `alert`, `emergency` |
@@ -497,14 +497,33 @@ Provided tools:
 | `create-fulltext-index`         | `search`   | `false`  | Create a fulltext index for text search                              | Supports multiple labels/relationship types.                                                                                                |
 | `set-vector-property`           | `search`   | `false`  | Set a node or relationship's embedding vector property                | Uses `db.create.setNodeVectorProperty`/`setRelationshipVectorProperty`. Requires at least one filter. Accepts a pre-computed `vector`, or `text` to embed server-side if the instance has an embedding provider configured — see [Multi-Instance HTTP Mode](docs/MULTI_INSTANCE.md#embedding-provider-optional). |
 | `check-embedding-dimensions`    | `search`   | `true`   | Validate a configured embedding provider/model against a vector index's dimensions | Generates one throwaway embedding, writes nothing. Requires an embedding provider configured on the instance.                  |
+| `create-node` | `graph` | `false` | Create a node with labels and properties | `mergeOn` makes it an idempotent upsert. Returns the node's `id`. See [Graph operation tools](#graph-operation-tools). |
+| `find-nodes` | `graph` | `true` | Find nodes by label, property values and/or filters | Paginated (`limit`/`skip`); `returnProperties` trims the output. |
+| `get-node` | `graph` | `true` | Get one node plus its relationship counts by type and direction | Select by `id` or a unique key. |
+| `update-node` | `graph` | `false` | Set/remove properties and add/remove labels on existing nodes | Guarded by `maxAffected` (default 1) and `dryRun`; needs `id`, `match` or `filters`. |
+| `delete-node` | `graph` | `false` | Delete nodes | **Destructive.** `detach` required to remove related nodes; guarded by `maxAffected` and `dryRun`. |
+| `count-nodes` | `graph` | `true` | Count nodes matching labels/properties/filters | Cheaper than `find-nodes` when only a number is needed. |
+| `create-relationship` | `graph` | `false` | Create a directed relationship between two existing nodes | Each end must select exactly one node. Reuses an identical relationship unless `allowDuplicate`. |
+| `find-relationships` | `graph` | `true` | Find relationships by type, end nodes and/or properties | Returns end-node summaries so no follow-up lookup is needed. |
+| `update-relationship` | `graph` | `false` | Set/remove properties on existing relationships | Guarded by `maxAffected` and `dryRun`. |
+| `delete-relationship` | `graph` | `false` | Delete relationships (end nodes are kept) | **Destructive.** Guarded by `maxAffected` and `dryRun`. |
+| `traverse` | `traversal` | `true` | Walk outward from a node: reachable nodes with depth, or the paths | Bounded by `maxDepth` (max 10). For dependencies, hierarchies, impact analysis. |
+| `expand-neighbors` | `traversal` | `true` | Everything exactly one hop from a node | Direction is reported relative to the start node. |
+| `find-shortest-path` | `traversal` | `true` | Shortest route (or all tied shortest) between two nodes | Uses Cypher 25 `ANY`/`ALL SHORTEST`. |
+| `find-all-paths` | `traversal` | `true` | Enumerate routes between two nodes, shortest first | Bounded by `maxDepth` (max 8) and `limit`. |
+| `match-pattern` | `patterns` | `true` | Find occurrences of a described pattern; return rows, a count, or existence | Pattern given as nodes + relationships, never Cypher. Must be connected. |
+| `find-common-connections` | `patterns` | `true` | Nodes shared by 2–5 given nodes (shared neighbors) | Collaboration, shared dependencies, mutual connections. |
+| `find-motif` | `patterns` | `true` | Detect `star`, `fan-in`, `fan-out`, `triangle` or `cycle` shapes | Name `relationshipTypes`/`nodeLabels` to keep it fast; `start` anchors it. |
+| `find-relationship-chain` | `patterns` | `true` | Follow an exact, ordered sequence of relationships from a node | Each step names the type, direction and optional target node criteria. |
+| `find-subgraph` | `patterns` | `true` | Extract the neighborhood around a node as nodes + relationships | Capped by `maxDepth` (max 4) and `maxNodes` (max 200). |
 | `list-gds-procedures`           | `gds`      | `true`   | List GDS procedures available in the Neo4j instance                  | Disabled automatically if GDS is not installed.                                                                                             |
 | `give-feedback`                 | `feedback` | `true`   | Submit free-text feedback about the MCP server itself                | For feedback on the server (tools, behaviour, docs), not on Cypher/database issues. Limited to 300 characters. See [Feedback](#feedback). |
 
 ### Selecting which tools are exposed
 
-Every tool belongs to exactly one category (`cypher`, `gds`, `feedback`, or `search`, per the table above) and carries a label — its MCP title annotation (e.g. "Read Cypher"), shown to clients that display a friendly tool name.
+Every tool belongs to exactly one category (`cypher`, `gds`, `feedback`, `search`, `graph`, `traversal`, or `patterns`, per the table above) and carries a label — its MCP title annotation (e.g. "Read Cypher"), shown to clients that display a friendly tool name.
 
-Tool selection can be narrowed in two ways, which combine with the existing `NEO4J_READ_ONLY`/GDS-availability/search-version filtering (a selection can only narrow the set further, never re-enable a tool those filters already excluded):
+Tool selection can be narrowed in two ways, which combine with the existing `NEO4J_READ_ONLY`/GDS-availability/search-version/Cypher-25 filtering (a selection can only narrow the set further, never re-enable a tool those filters already excluded):
 
 **Statically, at startup**, via `NEO4J_MCP_ENABLED_TOOLS` and/or `NEO4J_MCP_ENABLED_TOOL_CATEGORIES` (comma-separated; a tool is kept if it matches either list — see [Configuration Options](#configuration-options)):
 
@@ -568,6 +587,40 @@ If the wrapped query produces a syntax error, the server strips the internal `EX
 The `search` category — `vector-search`, `fulltext-search`, `create-vector-index`, `create-fulltext-index`, `set-vector-property`, `check-embedding-dimensions` — surfaces Cypher 25's `SEARCH` clause through structured fields only; no tool in this category accepts or returns raw Cypher. `vector-search`/`fulltext-search` auto-detect the target node label or relationship type from the index itself, so the caller only needs the index name. `vector-search`'s `filters` only work on properties registered as filterable at index-creation time via `create-vector-index`'s `filterableProperties` — filtering on any other property is a hard Neo4j limitation, not a tool restriction. `set-vector-property` takes either a caller-supplied embedding (`vector`) or raw `text` to embed — the latter only works when the connected Neo4j instance has an embedding provider configured, via `NEO4J_MCP_EMBEDDING_PROVIDER`/`NEO4J_MCP_EMBEDDING_CONFIGURATION` in single-instance mode (STDIO or single-instance HTTP) or via each entry's own `embedding` block in multi-instance HTTP mode (see [Multi-Instance HTTP Mode](docs/MULTI_INSTANCE.md#embedding-provider-optional) for the full provider/required-key table, which applies to both). Who actually generates it depends on the provider: `openai` is generated by this MCP server itself via a direct HTTP call (its `baseUrl` config key can redirect this to a local OpenAI-compatible server like LM Studio or Ollama, with no Neo4j-side involvement at all), while `azure-openai`/`vertexai`/`bedrock-titan` are generated by Neo4j's own GenAI plugin (`ai.text.embed`) instead, reusing the auth schemes it already implements. Either way, if a matching vector index already exists, the resulting vector's dimensions are checked against it before writing, and `check-embedding-dimensions` lets a caller validate a provider/model against an index up front without writing anything.
 
 This category requires a server on calendar version >= `2026.09.0` or classic Aura >= `5.27-aura` (native full-text `SEARCH`-clause support shipped in Neo4j's 2026.09 release; vector search alone works from `2026.01`, but the whole category is gated behind the higher floor for consistency). Below that floor, the six tools are automatically excluded from `tools/list` rather than failing at call time — the same way `list-gds-procedures` is excluded when GDS isn't installed.
+
+### Graph operation tools
+
+The `graph`, `traversal` and `patterns` categories let an agent create, read, update, delete and explore graph data **without writing any Cypher**. Every input is a structured field; no tool in these categories accepts or returns raw Cypher. Values are always bound as query parameters, labels/types/property keys are backtick-escaped, and filter operators and enums are checked against a fixed list before anything reaches the database.
+
+- **`graph`** — node and relationship CRUD: `create-node`, `find-nodes`, `get-node`, `update-node`, `delete-node`, `count-nodes`, `create-relationship`, `find-relationships`, `update-relationship`, `delete-relationship`.
+- **`traversal`** — navigating connections: `traverse` (reachability, dependencies, hierarchies), `expand-neighbors` (one hop), `find-shortest-path`, `find-all-paths`.
+- **`patterns`** — structural questions: `match-pattern`, `find-common-connections`, `find-motif`, `find-relationship-chain`, `find-subgraph`.
+
+How the tools fit together:
+
+- Every node and relationship is returned with an `id` (its `elementId`) that every other tool accepts, so results chain without any query writing. Nodes are selected the same way everywhere: `id`, `labels`, an exact-equality `match` map, and/or `filters` (`{property, operator, value}` with `=`, `<>`, `<`, `>`, `<=`, `>=`, `IN`, `CONTAINS`, `STARTS WITH`, `ENDS WITH`, `IS NULL`, `IS NOT NULL`).
+- Results are lean: a property you ask for that a node or relationship doesn't have is omitted rather than returned as `null`.
+- Everything is bounded: results have a default and a hard-capped `limit`, variable-length tools have a capped `maxDepth`, and the usual row cap, byte cap and `NEO4J_CYPHER_TIMEOUT` apply. A timeout error tells the caller how to narrow the request.
+- Write tools are safe by construction. `update-*` and `delete-*` refuse to run on a label or type alone, change at most `maxAffected` entities (default 1, max 1000) and report `performed: false` with the match count instead of acting when the selection is larger, and accept `dryRun` to preview the effect. `delete-node` will not delete a node that still has relationships unless `detach` is set. All write tools are annotated as such, so they are not registered when `NEO4J_READ_ONLY=true`.
+- Tool descriptions say when to use a tool instead of its siblings, and error messages say what was wrong, what is valid, and what to do next.
+
+These tools emit Cypher 25. When the connected server does not support it (calendar-versioned releases before `2025.06`, self-managed classic 5.x servers, or classic Aura before `5.26-aura`), the three categories are excluded from `tools/list` rather than failing at call time — the same way `list-gds-procedures` is excluded when GDS isn't installed.
+
+### Tool design principles
+
+New tools follow these principles. They are also listed in [AGENTS.md](AGENTS.md) for AI coding agents working in this repository.
+
+1. **Intent** — a tool solves one specific task a user would name. Name it verb-noun in kebab-case, and say in its description when to use it instead of a sibling tool.
+2. **Context** — a tool must not confuse or bloat the model. Keep parameter lists short, prefer enums to free text, and say what the tool returns and does not do. Every tool is context every client pays for, so merge overlapping tools instead of adding near-duplicates, and place tools in categories so deployments can switch off what they don't need.
+3. **Granularity** — combine the 3–4 atomic operations that always travel together into one high-level tool (resolve the target, check the guard, write, return the result). Combine by *task*, not by piling modes behind a flag.
+4. **Efficiency** — return only the fields the LLM needs: ids for chaining, summaries by default, projection options for the rest, and a default and hard-capped `limit`/`maxDepth`.
+5. **Safety** — a dangerous tool (delete, overwrite, anything irreversible) must be declared as such: `readOnly: false`, a destructive-hint annotation, and removal under `NEO4J_READ_ONLY`. Keep read and write in separate tools. Require an exact target (never "everything with label X"), cap the blast radius (`maxAffected`) and offer a `dryRun`.
+6. **Error handling** — an error must tell the LLM how to fix its mistake: what was wrong, what the valid values are, what to try next, and whether retrying can help at all.
+7. **Parameters only** — a tool takes structured fields, never Cypher. Values are bound as parameters, identifiers are escaped, operators and enums are whitelisted.
+8. **Bounded** — every tool has hard caps on rows, depth and time so no single call can run away.
+9. **Idempotent** — prefer operations that are safe to retry (`MERGE`, `IF NOT EXISTS`, set-to-value), and say in the description when a retry is safe.
+10. **Composable** — outputs have a stable shape and carry the ids other tools accept as inputs.
+11. **Verified** — the Cypher a tool generates is built by a pure function with unit tests, and every tool that touches the database has an integration test.
 
 ### Response format for `read-cypher` / `write-cypher`
 

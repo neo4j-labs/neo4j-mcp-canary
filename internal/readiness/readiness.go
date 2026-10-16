@@ -27,6 +27,21 @@ const (
 	minSearchClassicAuraMinor = 27
 )
 
+// minCypher25CalendarYear/Month and minCypher25ClassicAuraMajor/Minor are
+// the version floor for Cypher 25 itself (the "CYPHER 25" query prefix and
+// quantified path patterns), which every tool in tools.CategoryGraph,
+// CategoryTraversal and CategoryPatterns emits. Self-managed servers get
+// Cypher 25 with calendar-versioned Neo4j 2025.06; Aura instances report a
+// classic-style version (currently 5.27-aura) and are accepted from
+// 5.26-aura. A bare classic version on a non-Aura host never qualifies — see
+// the Aura normalization in checkVersionSupport.
+const (
+	minCypher25CalendarYear     = 2025
+	minCypher25CalendarMonth    = 6
+	minCypher25ClassicAuraMajor = 5
+	minCypher25ClassicAuraMinor = 26
+)
+
 // bareClassicVersionPattern matches a classic Neo4j version with no "-aura"
 // suffix, e.g. "5.27" or "5.27.0" — the shape CALL dbms.components() always
 // reports, even for Aura-classic instances (the "-aura" marker only ever
@@ -46,6 +61,10 @@ type Result struct {
 	// minSearchCalendarYear/Month and minSearchClassicAuraMajor/Minor
 	// above).
 	SearchVersionSupported bool
+	// Cypher25Supported reports whether the connected server clears the
+	// Cypher 25 version floor (see minCypher25CalendarYear/Month above),
+	// which the graph, traversal and patterns tool categories require.
+	Cypher25Supported bool
 }
 
 // Checker verifies that a Neo4j connection is ready for the server to use.
@@ -68,15 +87,18 @@ func NewChecker(db database.Service, uri string) *Checker {
 //   - A valid connection with a Neo4j instance.
 //   - The ability to perform a read query (database name is correctly defined).
 //   - In case GDS is not installed, Result.GDSInstalled is false rather than an error.
-//   - Whether the connected server's version clears the search category's floor.
+//   - Whether the connected server's version clears the search category's floor
+//     and the Cypher 25 floor the graph/traversal/patterns categories need.
 func (c *Checker) Verify(ctx context.Context) (Result, error) {
 	if err := c.db.VerifyConnectivity(ctx); err != nil {
 		return Result{}, err
 	}
 
+	searchOK, cypher25OK := c.checkVersionSupport(ctx)
 	result := Result{
 		GDSInstalled:           c.checkGDSInstalled(ctx),
-		SearchVersionSupported: c.checkSearchVersionSupported(ctx),
+		SearchVersionSupported: searchOK,
+		Cypher25Supported:      cypher25OK,
 	}
 	return result, nil
 }
@@ -100,11 +122,12 @@ func (c *Checker) checkGDSInstalled(ctx context.Context) bool {
 	return false
 }
 
-// checkSearchVersionSupported runs CALL dbms.components() — the same
+// checkVersionSupport runs CALL dbms.components() — the same
 // transport-agnostic query internal/eventing already uses for telemetry —
-// and compares the "Neo4j Kernel" version against the search category's
-// floor. Fails closed (false) on any query error or unparseable version,
-// same failure posture as checkGDSInstalled.
+// once and compares the "Neo4j Kernel" version against both the search
+// category's floor and the Cypher 25 floor. Fails closed (false, false) on
+// any query error or unparseable version, same failure posture as
+// checkGDSInstalled.
 //
 // Aura normalization: dbms.components() never reports the "-aura" suffix
 // database.MeetsMinimumVersion's classic-floor branch requires — that
@@ -114,16 +137,16 @@ func (c *Checker) checkGDSInstalled(ctx context.Context) bool {
 // only when the connection URI itself is confirmed Aura-managed —
 // otherwise a self-managed classic server could falsely claim the Aura
 // floor.
-func (c *Checker) checkSearchVersionSupported(ctx context.Context) bool {
+func (c *Checker) checkVersionSupport(ctx context.Context) (search, cypher25 bool) {
 	records, err := c.db.ExecuteReadQuery(ctx, "CALL dbms.components()", map[string]any{})
 	if err != nil {
-		log.Print("Impossible to verify Neo4j server version for search-tool support.")
-		return false
+		log.Print("Impossible to verify Neo4j server version for search and Cypher 25 tool support.")
+		return false, false
 	}
 
 	version := kernelVersion(records)
 	if version == "" {
-		return false
+		return false, false
 	}
 
 	if queryapi.IsAuraHost(c.uri) {
@@ -132,8 +155,9 @@ func (c *Checker) checkSearchVersionSupported(ctx context.Context) bool {
 		}
 	}
 
-	ok, _ := database.MeetsMinimumVersion(version, minSearchCalendarYear, minSearchCalendarMonth, minSearchClassicAuraMajor, minSearchClassicAuraMinor)
-	return ok
+	search, _ = database.MeetsMinimumVersion(version, minSearchCalendarYear, minSearchCalendarMonth, minSearchClassicAuraMajor, minSearchClassicAuraMinor)
+	cypher25, _ = database.MeetsMinimumVersion(version, minCypher25CalendarYear, minCypher25CalendarMonth, minCypher25ClassicAuraMajor, minCypher25ClassicAuraMinor)
+	return search, cypher25
 }
 
 // kernelVersion extracts the "Neo4j Kernel" row's version string from

@@ -123,7 +123,7 @@ export NEO4J_SCHEMA_SAMPLE_SIZE="100"       # Default: 100
 By default, an HTTP client sees every statically-enabled tool (see `NEO4J_MCP_ENABLED_TOOLS` / `NEO4J_MCP_ENABLED_TOOL_CATEGORIES` in the main [README](../README.md#selecting-which-tools-are-exposed)). A client can narrow that set for a single request by sending one or both of these headers (names configurable via `NEO4J_MCP_HTTP_TOOLS_HEADER_NAME` / `NEO4J_MCP_HTTP_TOOL_CATEGORIES_HEADER_NAME`):
 
 - `X-MCP-Tools` — comma-separated tool names, e.g. `read-cypher,get-schema`
-- `X-MCP-Tool-Categories` — comma-separated categories (`cypher`, `gds`, `feedback`), e.g. `gds`
+- `X-MCP-Tool-Categories` — comma-separated categories (`cypher`, `gds`, `feedback`, `search`, `graph`, `traversal`, `patterns`), e.g. `gds`
 
 ```bash
 curl -X POST http://127.0.0.1/mcp \
