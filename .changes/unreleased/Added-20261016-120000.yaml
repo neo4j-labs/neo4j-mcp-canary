@@ -1,0 +1,10 @@
+kind: Added
+body: >-
+  Added 19 parameter-only graph tools in three new categories — `graph` (create/find/get/update/delete/count nodes
+  and create/find/update/delete relationships), `traversal` (`traverse`, `expand-neighbors`, `find-shortest-path`,
+  `find-all-paths`) and `patterns` (`match-pattern`, `find-common-connections`, `find-motif`,
+  `find-relationship-chain`, `find-subgraph`). They let an agent work with graph data without writing Cypher; write
+  tools refuse unbounded selections, support `dryRun`, and are removed under `NEO4J_READ_ONLY`. Results are bounded
+  (default and maximum limits and depths) and lean — requested properties a node does not have are omitted rather than
+  returned as null. They require Cypher 25 and are excluded automatically on servers that do not support it.
+time: 2026-10-16T12:00:00.000000+02:00

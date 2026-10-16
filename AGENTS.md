@@ -8,8 +8,9 @@ re-deriving them from scratch.
 ## What this is
 
 `neo4j-mcp-canary` is an experimental MCP (Model Context Protocol) server for
-Neo4j, written in Go. It exposes a small set of tools (`get-schema`,
-`read-cypher`, `write-cypher`, `list-gds-procedures`, `give-feedback`) over
+Neo4j, written in Go. It exposes tools in seven categories — Cypher
+(`get-schema`, `read-cypher`, `write-cypher`, …), GDS, feedback, search, and
+the parameter-only `graph`, `traversal` and `patterns` categories — over
 stdio or streamable HTTP.
 
 ## Build / test / lint
@@ -78,7 +79,8 @@ handlers directly and bypass the runtime version gate
   Handler-side arg binding still happens via `request.BindArguments` into a
   plain Go struct — the two are deliberately decoupled.
 - **Every tool belongs to exactly one category** (`tools.CategoryCypher`,
-  `tools.CategoryGDS`, `tools.CategoryFeedback` — see
+  `tools.CategoryGDS`, `tools.CategoryFeedback`, `tools.CategorySearch`,
+  `tools.CategoryGraph`, `tools.CategoryTraversal`, `tools.CategoryPatterns` — see
   `internal/tools/category.go`) and is registered as a `ToolDefinition`
   (`Category`, `definition mcpsdk.ServerTool`, `readonly bool`) in the single
   literal slice returned by `getAllToolsDefs` in
@@ -109,6 +111,51 @@ handlers directly and bypass the runtime version gate
   one generic `Server.AddReceivingMiddleware` chain rather than typed hooks.
   Follow the existing `beforeMethodMiddleware`/`afterCallToolMiddleware`
   pattern rather than reaching into `sdk.Server` directly.
+
+- **The `graph`, `traversal` and `patterns` tools take no Cypher.** They live
+  in `internal/tools/graph`, `traversal` and `patterns`; each tool is a spec,
+  an input struct, and a pure `build…` function that returns a
+  `graphutil.Query`, wired up with `graphutil.NewHandler` (which binds
+  arguments, adds the `CYPHER 25` prefix, applies the row/byte caps and
+  timeout, and classifies errors). Use `graphutil` for everything that touches
+  user-supplied text: `QuoteIdentifier`/`LabelExpr`/`TypeExpr` for labels,
+  types and property keys, `Builder.Param` for every value (never interpolate
+  a value into Cypher), `NodeRef` for selecting nodes, and `FilterOperators`
+  for the operator whitelist. Test the `build…` function directly (exact
+  Cypher + params + validation errors); integration tests go in
+  `test/integration/graph_*_test.go`. These categories are gated on Cypher 25
+  support (`readiness.Result.Cypher25Supported` → `filterCypher25Tools`), so a
+  new tool in them needs no extra gating.
+
+## Tool design principles
+
+Apply these when adding or changing a tool (the README has the same list):
+
+1. **Intent** — one specific task; verb-noun kebab-case name; the description
+   says when to use it instead of a sibling.
+2. **Context** — don't confuse or bloat the model: short parameter lists,
+   enums over free text, merge overlapping tools rather than adding
+   near-duplicates.
+3. **Granularity** — combine the 3–4 atomic operations that always travel
+   together into one tool; combine by task, not by stacking modes on a flag.
+4. **Efficiency** — return only the fields the LLM needs (ids for chaining,
+   summaries by default, projection options), with a default and a hard-capped
+   `limit`/`maxDepth`.
+5. **Safety** — a dangerous tool (delete, overwrite, irreversible) is declared
+   as such: `readonly: false` in its `ToolDefinition`, destructive-hint
+   annotation, so `NEO4J_READ_ONLY` removes it. Separate read and write tools.
+   Require an exact target, cap the blast radius (`maxAffected`), offer
+   `dryRun`.
+6. **Error handling** — an error says what was wrong, what is valid, what to
+   do next, and whether retrying can help.
+7. **Parameters only** — structured fields in, no raw Cypher in or out;
+   values bound as parameters, identifiers escaped, operators/enums
+   whitelisted.
+8. **Bounded** — hard caps on rows, depth and time.
+9. **Idempotent** — prefer operations that are safe to retry, and say so.
+10. **Composable** — stable output shapes that carry the ids other tools accept.
+11. **Verified** — generated Cypher is unit-tested; tools that touch the
+    database have an integration test.
 
 ## Code style
 

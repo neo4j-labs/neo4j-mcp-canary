@@ -175,6 +175,82 @@
     {
       "name": "check-embedding-dimensions",
       "description": "Validate a configured embedding provider/model against a vector index's dimensions"
+    },
+    {
+      "name": "create-node",
+      "description": "Create a node with labels and properties"
+    },
+    {
+      "name": "find-nodes",
+      "description": "Find nodes by label, property values and/or filters"
+    },
+    {
+      "name": "get-node",
+      "description": "Get one node plus its relationship counts by type and direction"
+    },
+    {
+      "name": "update-node",
+      "description": "Set/remove properties and add/remove labels on existing nodes"
+    },
+    {
+      "name": "delete-node",
+      "description": "Delete nodes"
+    },
+    {
+      "name": "count-nodes",
+      "description": "Count nodes matching labels/properties/filters"
+    },
+    {
+      "name": "create-relationship",
+      "description": "Create a directed relationship between two existing nodes"
+    },
+    {
+      "name": "find-relationships",
+      "description": "Find relationships by type, end nodes and/or properties"
+    },
+    {
+      "name": "update-relationship",
+      "description": "Set/remove properties on existing relationships"
+    },
+    {
+      "name": "delete-relationship",
+      "description": "Delete relationships (end nodes are kept)"
+    },
+    {
+      "name": "traverse",
+      "description": "Walk outward from a node: reachable nodes with depth, or the paths"
+    },
+    {
+      "name": "expand-neighbors",
+      "description": "Everything exactly one hop from a node"
+    },
+    {
+      "name": "find-shortest-path",
+      "description": "Shortest route (or all tied shortest) between two nodes"
+    },
+    {
+      "name": "find-all-paths",
+      "description": "Enumerate routes between two nodes, shortest first"
+    },
+    {
+      "name": "match-pattern",
+      "description": "Find occurrences of a described pattern; return rows, a count, or existence"
+    },
+    {
+      "name": "find-common-connections",
+      "description": "Nodes shared by 2–5 given nodes (shared neighbors)"
+    },
+    {
+      "name": "find-motif",
+      "description": "Detect `star`, `fan-in`, `fan-out`, `triangle` or `cycle` shapes"
+    },
+    {
+      "name": "find-relationship-chain",
+      "description": "Follow an exact, ordered sequence of relationships from a node"
+    },
+    {
+      "name": "find-subgraph",
+      "description": "Extract the neighborhood around a node as nodes + relationships"
     }
   ],
   "compatibility": {

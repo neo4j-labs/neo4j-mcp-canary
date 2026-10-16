@@ -138,6 +138,37 @@ func TestChecker_Verify(t *testing.T) {
 		assert.False(t, result.SearchVersionSupported)
 	})
 
+	for _, tc := range []struct {
+		name, version, uri string
+		search, cypher25   bool
+	}{
+		{"below the Cypher 25 floor", "2025.05.0", "bolt://test-host:7687", false, false},
+		{"at the Cypher 25 floor", "2025.06.0", "bolt://test-host:7687", false, true},
+		{"clearing Cypher 25 but not the search floor", "2026.07.0", "bolt://test-host:7687", false, true},
+		{"classic server that is not Aura", "5.26.0", "bolt://test-host:7687", false, false},
+		{"classic Aura below the floor", "5.25.0", "neo4j+s://my-instance.databases.neo4j.io", false, false},
+		{"classic Aura at the floor", "5.26.0", "neo4j+s://my-instance.databases.neo4j.io", false, true},
+		{"classic Aura currently at 5.27", "5.27.0", "neo4j+s://my-instance.databases.neo4j.io", true, true},
+	} {
+		t.Run("Cypher 25 support: "+tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockDB := db.NewMockService(ctrl)
+			mockDB.EXPECT().VerifyConnectivity(gomock.Any()).Times(1)
+			mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), gdsVersionQuery, gomock.Any()).
+				Times(1).Return(nil, errors.New("boom"))
+			mockDB.EXPECT().ExecuteReadQuery(gomock.Any(), componentsQuery, gomock.Any()).
+				Times(1).Return(kernelComponentsRecord(tc.version), nil)
+
+			result, err := readiness.NewChecker(mockDB, tc.uri).Verify(context.Background())
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.search, result.SearchVersionSupported)
+			assert.Equal(t, tc.cypher25, result.Cypher25Supported)
+		})
+	}
+
 	t.Run("search version not supported below the calendar floor", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
