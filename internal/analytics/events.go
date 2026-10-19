@@ -100,6 +100,15 @@ type toolProperties struct {
 	OutputFormat config.OutputFormat `json:"output_format"`
 }
 
+// customToolProperties carries the CUSTOM_TOOL event: which operator-defined
+// tool ran and whether it succeeded. Deliberately no arguments, statement or
+// result data.
+type customToolProperties struct {
+	baseProperties
+	ToolName string `json:"tool_name"`
+	Success  bool   `json:"success"`
+}
+
 type TrackEvent struct {
 	Event      string      `json:"event"`
 	Properties interface{} `json:"properties"`
@@ -177,6 +186,20 @@ func (a *Analytics) NewToolEvent(toolsUsed string, success bool, vectorInfo *Too
 	return TrackEvent{
 		Event:      strings.Join([]string{eventNamePrefix, "TOOL_USED"}, "_"),
 		Properties: props,
+	}
+}
+
+// NewCustomToolEvent creates the CUSTOM_TOOL event emitted after every call
+// to an operator-defined custom tool, in place of the TOOL_USED event so
+// customer-chosen tool names stay out of the built-in tool usage stats.
+func (a *Analytics) NewCustomToolEvent(toolName string, success bool) TrackEvent {
+	return TrackEvent{
+		Event: strings.Join([]string{eventNamePrefix, "CUSTOM_TOOL"}, "_"),
+		Properties: customToolProperties{
+			baseProperties: a.getBaseProperties(),
+			ToolName:       toolName,
+			Success:        success,
+		},
 	}
 }
 

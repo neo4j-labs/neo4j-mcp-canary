@@ -14,6 +14,7 @@ import (
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/cli"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/configcheck"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/logger"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/oidc"
@@ -38,6 +39,13 @@ func main() {
 	// Parse CLI flags for configuration
 	overrides := cli.ParseConfigFlags()
 
+	if overrides[cli.ValidateConfigKey] == "true" {
+		connect := func(ctx context.Context, cfg *config.Config) (database.Service, func(), error) {
+			return initDatabaseService(ctx, cfg)
+		}
+		os.Exit(configcheck.Run(context.Background(), os.Stdout, overrides, connect))
+	}
+
 	// Load and validate configuration (CLI flags + env vars + optional config file)
 	cfg, err := config.LoadConfig(overrides)
 	if err != nil {
@@ -48,6 +56,10 @@ func main() {
 
 	// Initialize global logger
 	logger.Init(cfg.LogLevel, cfg.LogFormat, os.Stderr)
+
+	for _, w := range configcheck.UnknownKeyWarnings(config.ConfigFilePath(overrides)) {
+		slog.Warn(w)
+	}
 
 	ctx := context.Background()
 

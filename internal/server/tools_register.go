@@ -4,12 +4,16 @@
 package server
 
 import (
+	"fmt"
 	"log/slog"
 	"slices"
 	"time"
 
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/readiness"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/custom"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/cypher"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/feedback"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/gds"
@@ -28,6 +32,9 @@ import (
 // Tools can also be statically narrowed by name or category via Config.EnabledTools /
 // Config.EnabledToolCategories — see filterBySelection.
 func (s *Neo4jMCPServer) registerTools() error {
+	if err := s.validateCustomTools(); err != nil {
+		return err
+	}
 	filteredTools := s.getEnabledTools()
 	s.mcpServer.AddTools(filteredTools...)
 	return nil
@@ -223,8 +230,50 @@ func (s *Neo4jMCPServer) buildToolDependencies() *tools.ToolDependencies {
 	}
 }
 
-// getAllToolsDefs returns all available tools with their specs and handlers
+// validateCustomTools rejects a custom tool whose name or category collides
+// with a built-in one. A shared name would silently replace the built-in
+// tool, and a built-in category would subject the custom tool to that
+// category's gating (GDS, search, Cypher 25).
+func (s *Neo4jMCPServer) validateCustomTools() error {
+	if s.config == nil || len(s.config.CustomTools) == 0 {
+		return nil
+	}
+	builtinNames := map[string]bool{}
+	for _, d := range s.builtinToolsDefs(s.buildToolDependencies()) {
+		builtinNames[d.definition.Tool.Name] = true
+	}
+	for _, t := range s.config.CustomTools {
+		if builtinNames[t.Name] {
+			return fmt.Errorf("custom_tools: tool name %q is already used by a built-in tool; choose a different name", t.Name)
+		}
+		if slices.Contains(tools.AllCategories(), tools.Category(t.Category)) {
+			return fmt.Errorf("custom_tools: tool %q uses category %q, which is a built-in category; choose a different category", t.Name, t.Category)
+		}
+	}
+	return nil
+}
+
+// getAllToolsDefs returns the built-in tools followed by any custom tools
+// from the config file.
 func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDefinition {
+	defs := s.builtinToolsDefs(deps)
+	if s.config == nil {
+		return defs
+	}
+	for _, t := range s.config.CustomTools {
+		defs = append(defs, ToolDefinition{
+			Category: tools.Category(t.Category),
+			definition: mcpsdk.ServerTool{
+				Tool:    custom.Spec(t),
+				Handler: custom.Handler(deps, t),
+			},
+			readonly: t.Access == config.CustomToolAccessRead,
+		})
+	}
+	return defs
+}
+
+func (s *Neo4jMCPServer) builtinToolsDefs(deps *tools.ToolDependencies) []ToolDefinition {
 
 	return []ToolDefinition{
 		{
@@ -536,4 +585,105 @@ func (s *Neo4jMCPServer) getAllToolsDefs(deps *tools.ToolDependencies) []ToolDef
 			readonly: true,
 		},
 	}
+}
+
+// ToolConfigIssue is a problem with the tool-related configuration found by
+// CheckToolConfig. Error issues stop the server at startup; the rest are
+// warnings about configuration that is valid but will not do what it says.
+type ToolConfigIssue struct {
+	Error   bool
+	Message string
+}
+
+// CheckToolConfig reports problems with the custom tools and the static
+// tool selection (NEO4J_MCP_ENABLED_TOOLS / NEO4J_MCP_ENABLED_TOOL_CATEGORIES)
+// without a database. When caps is non-nil it also reports selected tools
+// the connected server can't offer.
+func CheckToolConfig(cfg *config.Config, caps *readiness.Result) []ToolConfigIssue {
+	s := &Neo4jMCPServer{config: cfg}
+	var issues []ToolConfigIssue
+
+	if err := s.validateCustomTools(); err != nil {
+		issues = append(issues, ToolConfigIssue{Error: true, Message: err.Error()})
+	}
+
+	defs := s.getAllToolsDefs(s.buildToolDependencies())
+	byName := map[string]ToolDefinition{}
+	categories := map[string]bool{}
+	for _, d := range defs {
+		byName[d.definition.Tool.Name] = d
+		categories[string(d.Category)] = true
+	}
+	names, selectedCategories := s.enabledToolSelection()
+	for _, n := range names {
+		if _, ok := byName[n]; !ok {
+			issues = append(issues, ToolConfigIssue{Message: fmt.Sprintf("NEO4J_MCP_ENABLED_TOOLS names unknown tool %q, which is ignored. Check the spelling against the tool list in the README (custom tool names come from custom_tools).", n)})
+		}
+	}
+	for _, c := range selectedCategories {
+		if !categories[c] {
+			issues = append(issues, ToolConfigIssue{Message: fmt.Sprintf("NEO4J_MCP_ENABLED_TOOL_CATEGORIES names unknown category %q, which is ignored. Valid categories: %v plus any custom_tools category.", c, tools.AllCategories())})
+		}
+	}
+
+	for _, d := range defs {
+		name := d.definition.Tool.Name
+		selected := len(names) == 0 && len(selectedCategories) == 0 ||
+			slices.Contains(names, name) || slices.Contains(selectedCategories, string(d.Category))
+		if !selected {
+			continue
+		}
+		if cfg.ReadOnly && !d.readonly {
+			if _, custom := customToolNamed(cfg, name); custom || slices.Contains(names, name) {
+				issues = append(issues, ToolConfigIssue{Message: fmt.Sprintf("tool %q modifies data and is removed because NEO4J_READ_ONLY is true. Set access: read if it only reads, or turn read-only mode off.", name)})
+			}
+			continue
+		}
+		if caps != nil {
+			if reason := unavailableReason(d.Category, caps); reason != "" {
+				issues = append(issues, ToolConfigIssue{Message: fmt.Sprintf("tool %q is selected but will not be registered: %s", name, reason)})
+			}
+		}
+	}
+
+	registered := 0
+	for _, d := range defs {
+		name := d.definition.Tool.Name
+		selected := len(names) == 0 && len(selectedCategories) == 0 ||
+			slices.Contains(names, name) || slices.Contains(selectedCategories, string(d.Category))
+		if selected && !(cfg.ReadOnly && !d.readonly) {
+			registered++
+		}
+	}
+	if registered == 0 {
+		issues = append(issues, ToolConfigIssue{Message: "the tool selection and read-only settings leave no tools enabled; the server would start with an empty tool list."})
+	}
+	return issues
+}
+
+func customToolNamed(cfg *config.Config, name string) (config.CustomTool, bool) {
+	for _, t := range cfg.CustomTools {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	return config.CustomTool{}, false
+}
+
+func unavailableReason(c tools.Category, caps *readiness.Result) string {
+	switch c {
+	case tools.CategoryGDS:
+		if !caps.GDSInstalled {
+			return "the Graph Data Science plugin is not installed on the connected server."
+		}
+	case tools.CategorySearch:
+		if !caps.SearchVersionSupported {
+			return "the connected Neo4j version is too old for the search category (needs 2026.09 or Aura 5.27)."
+		}
+	case tools.CategoryGraph, tools.CategoryTraversal, tools.CategoryPatterns:
+		if !caps.Cypher25Supported {
+			return "the connected Neo4j version does not support Cypher 25, which this category requires."
+		}
+	}
+	return ""
 }

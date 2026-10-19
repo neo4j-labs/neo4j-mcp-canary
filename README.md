@@ -329,9 +329,13 @@ neo4j_http_tls_enabled: true
 neo4j_cypher_max_rows: 500
 ```
 
-The equivalent JSON is also accepted (`.json` extension). Only scalar values (strings, numbers, booleans) are supported for every key except one — a nested object or list under any other key is a startup error. Values from CLI flags or environment variables always take precedence over the config file; a `--config-file` that fails to read or parse is a startup error.
+The equivalent JSON is also accepted (`.json` extension). Only scalar values (strings, numbers, booleans) are supported for every key except two — a nested object or list under any other key is a startup error. Values from CLI flags or environment variables always take precedence over the config file; a `--config-file` that fails to read or parse is a startup error.
 
 The one exception is `neo4j_instances`, a list of Neo4j instance definitions that turns on **multi-instance HTTP mode**, letting one server front several Neo4j instances at once, each reachable at its own URL path. It's configurable only via the config file — see [docs/MULTI_INSTANCE.md](docs/MULTI_INSTANCE.md) for the full config shape, per-instance auth types, and how a client selects an instance.
+
+A second file-only key, `custom_tools`, lets you define your own Cypher-backed tools — see [docs/CUSTOM_TOOLS.md](docs/CUSTOM_TOOLS.md).
+
+Run `neo4j-mcp-canary --validate-config` (with your usual flags, environment variables and `--config-file`) to check the whole configuration — every problem is reported, not just the first — without starting the server. It exits with status 1 if there are errors. See [docs/CUSTOM_TOOLS.md](docs/CUSTOM_TOOLS.md#validating-your-configuration) for what it checks.
 
 Adding a new configuration parameter to the server (env var + CLI flag + config-file key, all at once) means adding one entry to the `fields` slice in [`internal/config/schema.go`](internal/config/schema.go) — see that file's doc comments for the shape.
 

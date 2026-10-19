@@ -215,6 +215,12 @@ func Enum(values ...string) PropertyOption {
 	}
 }
 
+// EnumValues is Enum for non-string properties: the values are advertised as
+// given, so an integer property's enum stays numeric in the schema.
+func EnumValues(values ...any) PropertyOption {
+	return func(b *propertyBuilder) { b.schema.Enum = values }
+}
+
 // WithString declares a "string"-typed input property.
 func WithString(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) { addProperty(t, name, "string", nil, opts) }
@@ -236,6 +242,11 @@ func WithArray(name, itemType string, opts ...PropertyOption) ToolOption {
 // WithInteger declares an "integer"-typed input property.
 func WithInteger(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) { addProperty(t, name, "integer", nil, opts) }
+}
+
+// WithNumber declares a "number"-typed input property.
+func WithNumber(name string, opts ...PropertyOption) ToolOption {
+	return func(t *Tool) { addProperty(t, name, "number", nil, opts) }
 }
 
 // WithBoolean declares a "boolean"-typed input property.

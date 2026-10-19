@@ -18,6 +18,9 @@ var fieldsWithoutSchemaEntry = map[string]bool{
 	// every other Field is. It's deliberately configurable only via the
 	// config file's neo4j_instances key — see the comment on Config.Instances.
 	"Instances": true,
+	// CustomTools is likewise a list of objects, configurable only via the
+	// config file's custom_tools key.
+	"CustomTools": true,
 }
 
 // TestFields_MatchConfigStruct guards the exact failure mode that motivated

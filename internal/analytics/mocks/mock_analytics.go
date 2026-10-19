@@ -227,6 +227,82 @@ func (c *MockServiceNewConnectionInitializedEventCall) DoAndReturn(f func(analyt
 	return c
 }
 
+// NewCustomToolEvent mocks base method.
+func (m *MockService) NewCustomToolEvent(toolName string, success bool) analytics.TrackEvent {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NewCustomToolEvent", toolName, success)
+	ret0, _ := ret[0].(analytics.TrackEvent)
+	return ret0
+}
+
+// NewCustomToolEvent indicates an expected call of NewCustomToolEvent.
+func (mr *MockServiceMockRecorder) NewCustomToolEvent(toolName, success any) *MockServiceNewCustomToolEventCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewCustomToolEvent", reflect.TypeOf((*MockService)(nil).NewCustomToolEvent), toolName, success)
+	return &MockServiceNewCustomToolEventCall{Call: call}
+}
+
+// MockServiceNewCustomToolEventCall wrap *gomock.Call
+type MockServiceNewCustomToolEventCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockServiceNewCustomToolEventCall) Return(arg0 analytics.TrackEvent) *MockServiceNewCustomToolEventCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockServiceNewCustomToolEventCall) Do(f func(string, bool) analytics.TrackEvent) *MockServiceNewCustomToolEventCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockServiceNewCustomToolEventCall) DoAndReturn(f func(string, bool) analytics.TrackEvent) *MockServiceNewCustomToolEventCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// NewCypherEstimateEvent mocks base method.
+func (m *MockService) NewCypherEstimateEvent(outcome string, estimatedRows int64, actualRows int, truncated bool, estimateThreshold, rowCap int) analytics.TrackEvent {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NewCypherEstimateEvent", outcome, estimatedRows, actualRows, truncated, estimateThreshold, rowCap)
+	ret0, _ := ret[0].(analytics.TrackEvent)
+	return ret0
+}
+
+// NewCypherEstimateEvent indicates an expected call of NewCypherEstimateEvent.
+func (mr *MockServiceMockRecorder) NewCypherEstimateEvent(outcome, estimatedRows, actualRows, truncated, estimateThreshold, rowCap any) *MockServiceNewCypherEstimateEventCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewCypherEstimateEvent", reflect.TypeOf((*MockService)(nil).NewCypherEstimateEvent), outcome, estimatedRows, actualRows, truncated, estimateThreshold, rowCap)
+	return &MockServiceNewCypherEstimateEventCall{Call: call}
+}
+
+// MockServiceNewCypherEstimateEventCall wrap *gomock.Call
+type MockServiceNewCypherEstimateEventCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockServiceNewCypherEstimateEventCall) Return(arg0 analytics.TrackEvent) *MockServiceNewCypherEstimateEventCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockServiceNewCypherEstimateEventCall) Do(f func(string, int64, int, bool, int, int) analytics.TrackEvent) *MockServiceNewCypherEstimateEventCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockServiceNewCypherEstimateEventCall) DoAndReturn(f func(string, int64, int, bool, int, int) analytics.TrackEvent) *MockServiceNewCypherEstimateEventCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // NewFeedbackEvent mocks base method.
 func (m *MockService) NewFeedbackEvent(feedback string) analytics.TrackEvent {
 	m.ctrl.T.Helper()
@@ -341,44 +417,6 @@ func (c *MockServiceNewGDSProjDropEventCall) DoAndReturn(f func() analytics.Trac
 	return c
 }
 
-// NewCypherEstimateEvent mocks base method.
-func (m *MockService) NewCypherEstimateEvent(outcome string, estimatedRows int64, actualRows int, truncated bool, estimateThreshold, rowCap int) analytics.TrackEvent {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "NewCypherEstimateEvent", outcome, estimatedRows, actualRows, truncated, estimateThreshold, rowCap)
-	ret0, _ := ret[0].(analytics.TrackEvent)
-	return ret0
-}
-
-// NewCypherEstimateEvent indicates an expected call of NewCypherEstimateEvent.
-func (mr *MockServiceMockRecorder) NewCypherEstimateEvent(outcome, estimatedRows, actualRows, truncated, estimateThreshold, rowCap any) *MockServiceNewCypherEstimateEventCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewCypherEstimateEvent", reflect.TypeOf((*MockService)(nil).NewCypherEstimateEvent), outcome, estimatedRows, actualRows, truncated, estimateThreshold, rowCap)
-	return &MockServiceNewCypherEstimateEventCall{Call: call}
-}
-
-// MockServiceNewCypherEstimateEventCall wrap *gomock.Call
-type MockServiceNewCypherEstimateEventCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockServiceNewCypherEstimateEventCall) Return(arg0 analytics.TrackEvent) *MockServiceNewCypherEstimateEventCall {
-	c.Call = c.Call.Return(arg0)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockServiceNewCypherEstimateEventCall) Do(f func(string, int64, int, bool, int, int) analytics.TrackEvent) *MockServiceNewCypherEstimateEventCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockServiceNewCypherEstimateEventCall) DoAndReturn(f func(string, int64, int, bool, int, int) analytics.TrackEvent) *MockServiceNewCypherEstimateEventCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
 // NewSchemaRetrievalEvent mocks base method.
 func (m *MockService) NewSchemaRetrievalEvent(outcome string, durationMs int64, timeoutSeconds float64, sampleSize, nodeLabelCount, relTypeCount, indexCount, missingNodeLabelCount, missingRelTypeCount int) analytics.TrackEvent {
 	m.ctrl.T.Helper()
@@ -418,7 +456,7 @@ func (c *MockServiceNewSchemaRetrievalEventCall) DoAndReturn(f func(string, int6
 }
 
 // NewStartupEvent mocks base method.
-func (m *MockService) NewStartupEvent(transportMode config.TransportMode, tlsEnabled bool, mcpServer string, connectionMode string) analytics.TrackEvent {
+func (m *MockService) NewStartupEvent(transportMode config.TransportMode, tlsEnabled bool, mcpServer, connectionMode string) analytics.TrackEvent {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "NewStartupEvent", transportMode, tlsEnabled, mcpServer, connectionMode)
 	ret0, _ := ret[0].(analytics.TrackEvent)
