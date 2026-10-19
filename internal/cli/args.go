@@ -21,6 +21,14 @@ var osExit = os.Exit
 // can be built.
 const configFileFlagName = "config-file"
 
+// validateConfigFlagName is the boolean --validate-config flag. Like
+// --config-file it is not a Config field; it selects a different mode of
+// operation, reported through CLIOverrides under validateConfigKey.
+const validateConfigFlagName = "validate-config"
+
+// ValidateConfigKey is the CLIOverrides key set to "true" by --validate-config.
+const ValidateConfigKey = "ValidateConfig"
+
 // argsSlice lists every known configuration flag, derived from
 // config.Fields() plus --config-file. HandleArgs pre-scans os.Args for these
 // so it can skip past them (and their values) before the stdlib flag package
@@ -71,6 +79,9 @@ Usage:
 Options:
   -h, --help                          Show this help message
   -v, --version                       Show version information
+  --validate-config                   Check the whole configuration (including custom_tools statements, when a
+                                      database connection is possible), print every problem found, and exit
+                                      with status 1 if any is an error
 %s
 Required Environment Variables:
 %s
@@ -103,6 +114,8 @@ func ParseConfigFlags() config.CLIOverrides {
 	}
 	configFile := flag.String(configFileFlagName, "", "Path to an optional JSON or YAML config file (overrides NEO4J_CONFIG_FILE env var)")
 
+	validate := flag.Bool(validateConfigFlagName, false, "Validate the configuration, print any problems and exit")
+
 	flag.Parse()
 
 	overrides := config.CLIOverrides{}
@@ -113,6 +126,9 @@ func ParseConfigFlags() config.CLIOverrides {
 	}
 	if *configFile != "" {
 		overrides["ConfigFile"] = *configFile
+	}
+	if *validate {
+		overrides[ValidateConfigKey] = "true"
 	}
 	return overrides
 }
@@ -154,6 +170,8 @@ func HandleArgs(version string) {
 		switch arg {
 		case "-h", "--help":
 			flags["help"] = true
+			i++
+		case "--" + validateConfigFlagName:
 			i++
 		case "-v", "--version":
 			flags["version"] = true

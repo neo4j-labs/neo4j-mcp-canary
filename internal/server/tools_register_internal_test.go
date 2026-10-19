@@ -9,10 +9,14 @@ package server
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/readiness"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools"
 )
 
@@ -150,4 +154,99 @@ func TestFilterBySelection(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCustomTools_RegisteredWithCategoryAndAccess(t *testing.T) {
+	s := &Neo4jMCPServer{config: &config.Config{CustomTools: []config.CustomTool{
+		{Name: "find-customer", Description: "d", Category: "crm", Access: config.CustomToolAccessRead, Statement: "RETURN 1"},
+		{Name: "merge-customer", Description: "d", Category: "crm", Access: config.CustomToolAccessReadWrite, Statement: "RETURN 1"},
+	}}}
+	require.NoError(t, s.validateCustomTools())
+
+	defs := s.getAllToolsDefs(s.buildToolDependencies())
+	byName := map[string]ToolDefinition{}
+	for _, d := range defs {
+		byName[d.definition.Tool.Name] = d
+	}
+	assert.Equal(t, tools.Category("crm"), byName["find-customer"].Category)
+	assert.True(t, byName["find-customer"].readonly)
+	assert.False(t, byName["merge-customer"].readonly)
+
+	readOnly := filterWriteTools(defs)
+	names := map[string]bool{}
+	for _, d := range readOnly {
+		names[d.definition.Tool.Name] = true
+	}
+	assert.True(t, names["find-customer"])
+	assert.False(t, names["merge-customer"], "NEO4J_READ_ONLY must remove readwrite custom tools")
+
+	selected := filterBySelection(nil, []string{"crm"})(defs)
+	assert.Len(t, selected, 2)
+}
+
+func TestValidateCustomTools_RejectsBuiltInCollisions(t *testing.T) {
+	base := config.CustomTool{Name: "my-tool", Description: "d", Category: "crm", Access: config.CustomToolAccessRead, Statement: "RETURN 1"}
+
+	clashName := base
+	clashName.Name = "read-cypher"
+	err := (&Neo4jMCPServer{config: &config.Config{CustomTools: []config.CustomTool{clashName}}}).validateCustomTools()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "built-in tool")
+
+	clashCategory := base
+	clashCategory.Category = "gds"
+	err = (&Neo4jMCPServer{config: &config.Config{CustomTools: []config.CustomTool{clashCategory}}}).validateCustomTools()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "built-in category")
+}
+
+func TestCheckToolConfig(t *testing.T) {
+	messages := func(issues []ToolConfigIssue) string {
+		var out string
+		for _, i := range issues {
+			out += i.Message + "\n"
+		}
+		return out
+	}
+
+	t.Run("clean config has no issues", func(t *testing.T) {
+		assert.Empty(t, CheckToolConfig(&config.Config{}, nil))
+	})
+
+	t.Run("unknown names and categories warn", func(t *testing.T) {
+		issues := CheckToolConfig(&config.Config{EnabledTools: "read-cypher,nope", EnabledToolCategories: "nonsense"}, nil)
+		out := messages(issues)
+		assert.Contains(t, out, `unknown tool "nope"`)
+		assert.Contains(t, out, `unknown category "nonsense"`)
+		for _, i := range issues {
+			assert.False(t, i.Error)
+		}
+	})
+
+	t.Run("selected write tool removed by read-only", func(t *testing.T) {
+		out := messages(CheckToolConfig(&config.Config{ReadOnly: true, EnabledTools: "read-cypher,write-cypher"}, nil))
+		assert.Contains(t, out, `"write-cypher" modifies data and is removed because NEO4J_READ_ONLY`)
+	})
+
+	t.Run("readwrite custom tool under read-only warns", func(t *testing.T) {
+		cfg := &config.Config{ReadOnly: true, CustomTools: []config.CustomTool{
+			{Name: "merge-customer", Description: "d", Category: "crm", Access: config.CustomToolAccessReadWrite, Statement: "RETURN 1"},
+		}}
+		assert.Contains(t, messages(CheckToolConfig(cfg, nil)), `"merge-customer" modifies data`)
+	})
+
+	t.Run("selection leaving no tools warns", func(t *testing.T) {
+		out := messages(CheckToolConfig(&config.Config{ReadOnly: true, EnabledTools: "write-cypher"}, nil))
+		assert.Contains(t, out, "leave no tools enabled")
+	})
+
+	t.Run("capabilities", func(t *testing.T) {
+		cfg := &config.Config{EnabledToolCategories: "gds,search,graph"}
+		out := messages(CheckToolConfig(cfg, &readiness.Result{}))
+		assert.Contains(t, out, "Graph Data Science plugin is not installed")
+		assert.Contains(t, out, "too old for the search category")
+		assert.Contains(t, out, "does not support Cypher 25")
+
+		assert.Empty(t, CheckToolConfig(cfg, &readiness.Result{GDSInstalled: true, SearchVersionSupported: true, Cypher25Supported: true}))
+	})
 }

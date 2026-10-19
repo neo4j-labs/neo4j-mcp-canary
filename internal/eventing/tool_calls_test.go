@@ -239,3 +239,32 @@ func TestEmitter_OnToolCallComplete(t *testing.T) {
 		e.OnToolCallComplete(context.Background(), toolRequest("get-schema", "CALL gds.graph.project('g', '*', '*')"), mcpsdk.NewToolResultText(`{"indexes":[]}`))
 	})
 }
+
+func TestEmitter_OnToolCallComplete_CustomTool(t *testing.T) {
+	cfg := &config.Config{
+		OutputFormat: config.OutputFormatJSON,
+		CustomTools:  []config.CustomTool{{Name: "find-customer"}},
+	}
+
+	for name, tc := range map[string]struct {
+		result  *mcpsdk.CallToolResult
+		success bool
+	}{
+		"success": {mcpsdk.NewToolResultText("ok"), true},
+		"failure": {mcpsdk.NewToolResultError("nope"), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			analyticsService := analytics.NewMockService(ctrl)
+			analyticsService.EXPECT().IsEnabled().Return(true)
+			// NewToolEvent is deliberately not expected: custom tools only emit CUSTOM_TOOL.
+			analyticsService.EXPECT().NewCustomToolEvent("find-customer", tc.success).Times(1)
+			analyticsService.EXPECT().EmitEvent(gomock.Any()).Times(1)
+
+			e := eventing.NewEmitter(analyticsService, db.NewMockService(ctrl), cfg, "test-version")
+			e.OnToolCallComplete(context.Background(), toolRequest("find-customer", ""), tc.result)
+		})
+	}
+}

@@ -148,6 +148,11 @@ type Config struct {
 	// Password and only valid in HTTP transport mode — see Validate.
 	Instances []NeoInstance
 
+	// CustomTools are operator-defined Cypher tools from the config file's
+	// custom_tools key. File-only for the same reason as Instances — see
+	// internal/config/custom_tools.go.
+	CustomTools []CustomTool
+
 	// EmbeddingProvider/EmbeddingConfiguration configure a GenAI embedding
 	// provider for single-instance mode (STDIO or single-instance HTTP) —
 	// the top-level equivalent of a multi-instance NeoInstance's Embedding
@@ -204,10 +209,21 @@ func (c *Config) EmbeddingConfig() (*EmbeddingConfig, error) {
 	return &embConf, nil
 }
 
-// Validate validates the configuration and returns an error if invalid
+// Validate validates the configuration and returns the first problem found,
+// or nil if the configuration is valid. See ValidateAll for every problem.
 func (c *Config) Validate() error {
+	if errs := c.ValidateAll(); len(errs) > 0 {
+		return errs[0]
+	}
+	return nil
+}
+
+// ValidateAll validates the configuration and returns every problem found,
+// in the order Validate would report them. An invalid transport mode
+// returns immediately, since the remaining checks depend on it.
+func (c *Config) ValidateAll() []error {
 	if c == nil {
-		return fmt.Errorf("configuration is required but was nil")
+		return []error{fmt.Errorf("configuration is required but was nil")}
 	}
 
 	// Default to stdio if not provided (maintains backward compatibility with tests constructing Config directly)
@@ -217,8 +233,13 @@ func (c *Config) Validate() error {
 
 	// Validate transport mode
 	if !slices.Contains(ValidTransportModes, c.TransportMode) {
-		return fmt.Errorf("invalid transport mode '%s', must be one of %v", c.TransportMode, ValidTransportModes)
+		return []error{fmt.Errorf("invalid transport mode '%s', must be one of %v", c.TransportMode, ValidTransportModes)}
 	}
+
+	var errs []error
+	add := func(err error) { errs = append(errs, err) }
+
+	errs = append(errs, unjoin(ValidateCustomTools(c.CustomTools))...)
 
 	if len(c.Instances) > 0 {
 		// Multi-instance mode replaces the single URI/Username/Password
@@ -227,58 +248,69 @@ func (c *Config) Validate() error {
 		// sense for stateless per-request HTTP calls, not a single
 		// long-lived STDIO connection.
 		if c.TransportMode != TransportModeHTTP {
-			return fmt.Errorf("neo4j_instances is only supported when the transport mode is 'http'")
+			add(fmt.Errorf("neo4j_instances is only supported when the transport mode is 'http'"))
 		}
 		if c.URI != "" || c.Username != "" || c.Password != "" {
-			return fmt.Errorf("neo4j_instances cannot be combined with neo4j_uri/neo4j_username/neo4j_password; configure connection details per instance instead")
+			add(fmt.Errorf("neo4j_instances cannot be combined with neo4j_uri/neo4j_username/neo4j_password; configure connection details per instance instead"))
 		}
 		if err := ValidateInstances(c.Instances); err != nil {
-			return err
+			add(err)
 		}
 		if c.EmbeddingProvider != "" || c.EmbeddingConfiguration != "" {
-			return fmt.Errorf("neo4j_instances cannot be combined with a top-level embedding provider; configure embedding per instance instead")
+			add(fmt.Errorf("neo4j_instances cannot be combined with a top-level embedding provider; configure embedding per instance instead"))
 		}
 	} else {
 		// URI is always required in single-instance mode
 		if c.URI == "" {
-			return fmt.Errorf("Neo4j URI is required but was empty")
+			add(fmt.Errorf("Neo4j URI is required but was empty"))
 		}
 
 		// For STDIO mode, require username and password from environment
 		// For HTTP mode, credentials come from per-request Basic Auth headers
 		if c.TransportMode == TransportModeStdio {
 			if c.Username == "" {
-				return fmt.Errorf("Neo4j username is required for STDIO mode")
+				add(fmt.Errorf("Neo4j username is required for STDIO mode"))
 			}
 			if c.Password == "" {
-				return fmt.Errorf("Neo4j password is required for STDIO mode")
+				add(fmt.Errorf("Neo4j password is required for STDIO mode"))
 			}
 		} else if c.Username != "" || c.Password != "" {
-			return fmt.Errorf("Neo4j username and password should not be set for HTTP transport mode; credentials are provided per-request via Basic Auth headers")
+			add(fmt.Errorf("Neo4j username and password should not be set for HTTP transport mode; credentials are provided per-request via Basic Auth headers"))
 		}
 	}
 
 	// For HTTP mode with TLS enabled, require certificate and key files
 	if c.TransportMode == TransportModeHTTP && c.HTTPTLSEnabled {
-		if c.HTTPTLSCertFile == "" {
-			return fmt.Errorf("TLS certificate file is required when TLS is enabled (set NEO4J_MCP_HTTP_TLS_CERT_FILE)")
-		}
-		if c.HTTPTLSKeyFile == "" {
-			return fmt.Errorf("TLS key file is required when TLS is enabled (set NEO4J_MCP_HTTP_TLS_KEY_FILE)")
-		}
-
-		// Validate that certificate and key files exist and are valid
-		// This provides early, clear error messages before attempting to start the server
-		if _, err := tls.LoadX509KeyPair(c.HTTPTLSCertFile, c.HTTPTLSKeyFile); err != nil {
-			return fmt.Errorf("failed to load TLS certificate and key: %w", err)
+		switch {
+		case c.HTTPTLSCertFile == "":
+			add(fmt.Errorf("TLS certificate file is required when TLS is enabled (set NEO4J_MCP_HTTP_TLS_CERT_FILE)"))
+		case c.HTTPTLSKeyFile == "":
+			add(fmt.Errorf("TLS key file is required when TLS is enabled (set NEO4J_MCP_HTTP_TLS_KEY_FILE)"))
+		default:
+			// Validate that certificate and key files exist and are valid
+			// This provides early, clear error messages before attempting to start the server
+			if _, err := tls.LoadX509KeyPair(c.HTTPTLSCertFile, c.HTTPTLSKeyFile); err != nil {
+				add(fmt.Errorf("failed to load TLS certificate and key: %w", err))
+			}
 		}
 	}
 
 	// Fail fast on a malformed/invalid embedding provider config at
 	// startup, rather than surfacing it only at first tool call.
 	if _, err := c.EmbeddingConfig(); err != nil {
-		return fmt.Errorf("invalid embedding configuration: %w", err)
+		add(fmt.Errorf("invalid embedding configuration: %w", err))
 	}
 
-	return nil
+	return errs
+}
+
+// unjoin splits an errors.Join result back into its parts.
+func unjoin(err error) []error {
+	if err == nil {
+		return nil
+	}
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		return j.Unwrap()
+	}
+	return []error{err}
 }

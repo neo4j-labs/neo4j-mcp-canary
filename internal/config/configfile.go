@@ -50,6 +50,10 @@ func loadConfigFile(path string) (map[string]string, []NeoInstance, error) {
 		return nil, nil, fmt.Errorf("unsupported config file extension %q for %q (expected .yaml, .yml, or .json)", ext, path)
 	}
 
+	// custom_tools is decoded separately by loadCustomTools; drop it here so
+	// the scalar-only loop below doesn't reject it.
+	popKeyCaseInsensitive(raw, customToolsKey)
+
 	var instances []NeoInstance
 	if rawInstances, ok := popKeyCaseInsensitive(raw, instancesKey); ok {
 		instances, err = decodeInstances(rawInstances)

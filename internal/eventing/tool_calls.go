@@ -5,9 +5,11 @@ package eventing
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/analytics"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/config"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
 )
 
@@ -22,6 +24,13 @@ func (e *Emitter) OnToolCallComplete(_ context.Context, request *mcpsdk.CallTool
 	success := true
 	if result != nil {
 		success = !result.IsError
+	}
+
+	// Custom tools report under their own event, which carries only name and
+	// outcome; none of the built-in per-tool inspection below applies.
+	if e.isCustomTool(toolName) {
+		e.an.EmitEvent(e.an.NewCustomToolEvent(toolName, success))
+		return
 	}
 
 	// Build vector info based on tool type. read-cypher/write-cypher/
@@ -123,4 +132,11 @@ func (e *Emitter) emitGDSEventsIfNeeded(request *mcpsdk.CallToolRequest) {
 	if strings.Contains(lowerQuery, "call gds.graph.drop") {
 		e.an.EmitEvent(e.an.NewGDSProjDropEvent())
 	}
+}
+
+func (e *Emitter) isCustomTool(name string) bool {
+	if e.cfg == nil {
+		return false
+	}
+	return slices.ContainsFunc(e.cfg.CustomTools, func(t config.CustomTool) bool { return t.Name == name })
 }

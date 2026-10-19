@@ -5,7 +5,6 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -15,17 +14,26 @@ import (
 //
 // overrides may be nil, matching a run with no CLI flags supplied.
 func LoadConfig(overrides CLIOverrides) (*Config, error) {
-	configFilePath := overrides[configFileOverrideKey]
-	if configFilePath == "" {
-		configFilePath = os.Getenv(configFileEnvVar)
+	cfg, errs := LoadConfigAll(overrides)
+	if len(errs) > 0 {
+		return nil, errs[0]
 	}
+	return cfg, nil
+}
+
+// LoadConfigAll is LoadConfig reporting every problem it finds rather than
+// stopping at the first. The returned Config is nil only when the config
+// file itself could not be read or parsed; otherwise it is the best-effort
+// resolved configuration, even when errs is non-empty.
+func LoadConfigAll(overrides CLIOverrides) (*Config, []error) {
+	configFilePath := ConfigFilePath(overrides)
 
 	var fileValues map[string]string
 	var instances []NeoInstance
 	if configFilePath != "" {
 		values, insts, err := loadConfigFile(configFilePath)
 		if err != nil {
-			return nil, err
+			return nil, []error{err}
 		}
 		fileValues = values
 		instances = insts
@@ -45,6 +53,14 @@ func LoadConfig(overrides CLIOverrides) (*Config, error) {
 	// it's file-only by construction, so it's set directly here rather than
 	// through the CLI/env/file precedence chain the loop above resolves.
 	cfg.Instances = instances
+	var errs []error
+	if configFilePath != "" {
+		customTools, err := loadCustomTools(configFilePath)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		cfg.CustomTools = customTools
+	}
 
 	// HTTPPort's default depends on HTTPTLSEnabled, which is only known once
 	// the loop above has resolved it — this can't be expressed as a per-field
@@ -57,35 +73,27 @@ func LoadConfig(overrides CLIOverrides) (*Config, error) {
 		}
 	}
 
-	// Normalize and validate the auth header name.
-	headName := strings.TrimSpace(cfg.AuthHeaderName)
-	if headName == "" {
-		return nil, fmt.Errorf("invalid auth header name: explicitly configured header name cannot be empty; unset NEO4J_HTTP_AUTH_HEADER_NAME or provide a valid header name")
+	// Normalize and validate the header names. Each is trimmed in place; an
+	// empty one is an error since there is no sensible default to fall back
+	// to once it was explicitly configured.
+	headers := []struct {
+		label, envVar string
+		value         *string
+	}{
+		{"auth header name", "NEO4J_HTTP_AUTH_HEADER_NAME", &cfg.AuthHeaderName},
+		{"tools header name", "NEO4J_MCP_HTTP_TOOLS_HEADER_NAME", &cfg.HTTPToolsHeaderName},
+		{"tool categories header name", "NEO4J_MCP_HTTP_TOOL_CATEGORIES_HEADER_NAME", &cfg.HTTPToolCategoriesHeaderName},
+		{"API key header name", "NEO4J_MCP_HTTP_API_KEY_HEADER_NAME", &cfg.HTTPAPIKeyHeaderName},
 	}
-	cfg.AuthHeaderName = headName
-
-	// Normalize and validate the tool-selection header names.
-	toolsHeaderName := strings.TrimSpace(cfg.HTTPToolsHeaderName)
-	if toolsHeaderName == "" {
-		return nil, fmt.Errorf("invalid tools header name: explicitly configured header name cannot be empty; unset NEO4J_MCP_HTTP_TOOLS_HEADER_NAME or provide a valid header name")
-	}
-	cfg.HTTPToolsHeaderName = toolsHeaderName
-
-	toolCategoriesHeaderName := strings.TrimSpace(cfg.HTTPToolCategoriesHeaderName)
-	if toolCategoriesHeaderName == "" {
-		return nil, fmt.Errorf("invalid tool categories header name: explicitly configured header name cannot be empty; unset NEO4J_MCP_HTTP_TOOL_CATEGORIES_HEADER_NAME or provide a valid header name")
-	}
-	cfg.HTTPToolCategoriesHeaderName = toolCategoriesHeaderName
-
-	apiKeyHeaderName := strings.TrimSpace(cfg.HTTPAPIKeyHeaderName)
-	if apiKeyHeaderName == "" {
-		return nil, fmt.Errorf("invalid API key header name: explicitly configured header name cannot be empty; unset NEO4J_MCP_HTTP_API_KEY_HEADER_NAME or provide a valid header name")
-	}
-	cfg.HTTPAPIKeyHeaderName = apiKeyHeaderName
-
-	if err := cfg.Validate(); err != nil {
-		return nil, err
+	for _, h := range headers {
+		trimmed := strings.TrimSpace(*h.value)
+		if trimmed == "" {
+			errs = append(errs, fmt.Errorf("invalid %s: explicitly configured header name cannot be empty; unset %s or provide a valid header name", h.label, h.envVar))
+			continue
+		}
+		*h.value = trimmed
 	}
 
-	return cfg, nil
+	errs = append(errs, cfg.ValidateAll()...)
+	return cfg, errs
 }
