@@ -149,6 +149,14 @@ func HandleArgs(version string) {
 	for i < len(os.Args) {
 		arg := os.Args[i]
 
+		// The --name=value form carries its value in the same argument. Whether
+		// that value is acceptable (for example a malformed boolean for
+		// --validate-config) is for the flag package to judge in ParseConfigFlags.
+		if name, _, hasValue := strings.Cut(arg, "="); hasValue && (slices.Contains(argsSlice, name) || name == "--"+validateConfigFlagName) {
+			i++
+			continue
+		}
+
 		// Allow configuration flags to be parsed by the flag package
 		if slices.Contains(argsSlice, arg) {
 			// Check if there's a value following the flag

@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"flag"
 	"io"
 	"os"
 	"strings"
@@ -136,6 +137,62 @@ func TestHandleArgs(t *testing.T) {
 			args:             []string{testProgramName, "--neo4j-uri", "bolt://localhost:7687"},
 			version:          testVersion,
 			expectedExitCode: -1, // Should not exit, flag is allowed
+		},
+		{
+			name:             "configuration flag in --name=value form",
+			args:             []string{testProgramName, "--neo4j-uri=bolt://localhost:7687"},
+			version:          testVersion,
+			expectedExitCode: -1,
+		},
+		{
+			name:             "config-file flag in --name=value form",
+			args:             []string{testProgramName, "--config-file=/etc/neo4j-mcp/config.yaml"},
+			version:          testVersion,
+			expectedExitCode: -1,
+		},
+		{
+			name:             "configuration flag in --name=value form with an empty value",
+			args:             []string{testProgramName, "--neo4j-database="},
+			version:          testVersion,
+			expectedExitCode: -1,
+		},
+		{
+			name:             "--name=value mixed with the separate-value form",
+			args:             []string{testProgramName, "--neo4j-uri=bolt://localhost:7687", "--neo4j-username", "user"},
+			version:          testVersion,
+			expectedExitCode: -1,
+		},
+		{
+			name:             "validate-config flag",
+			args:             []string{testProgramName, "--validate-config"},
+			version:          testVersion,
+			expectedExitCode: -1,
+		},
+		{
+			name:             "validate-config flag with =true",
+			args:             []string{testProgramName, "--validate-config=true"},
+			version:          testVersion,
+			expectedExitCode: -1,
+		},
+		{
+			name:             "validate-config flag with =false",
+			args:             []string{testProgramName, "--validate-config=false"},
+			version:          testVersion,
+			expectedExitCode: -1,
+		},
+		{
+			name:             "unknown flag in --name=value form is still rejected",
+			args:             []string{testProgramName, "--neo4j-nope=1"},
+			version:          testVersion,
+			expectedExitCode: 1,
+			expectedStderr:   "unknown flag or argument: --neo4j-nope=1",
+		},
+		{
+			name:             "--name=value does not hide a following unknown argument",
+			args:             []string{testProgramName, "--neo4j-uri=bolt://localhost:7687", "extra"},
+			version:          testVersion,
+			expectedExitCode: 1,
+			expectedStderr:   "unknown flag or argument: extra",
 		},
 		{
 			name:             "multiple configuration flags",
@@ -420,6 +477,40 @@ func TestHandleArgs(t *testing.T) {
 				if !strings.Contains(stdout, tt.expectedOutput) {
 					t.Errorf("stdout: got %q, want to contain %q", stdout, tt.expectedOutput)
 				}
+			}
+		})
+	}
+}
+
+func TestParseConfigFlags_AcceptsBothValueForms(t *testing.T) {
+	oldArgs, oldFlags := os.Args, flag.CommandLine
+	defer func() { os.Args, flag.CommandLine = oldArgs, oldFlags }()
+
+	for name, tc := range map[string]struct {
+		args         []string
+		wantURI      string
+		wantFile     string
+		wantValidate bool
+	}{
+		"separate values": {[]string{testProgramName, "--neo4j-uri", "bolt://a:7687", "--config-file", "c.yaml", "--validate-config"}, "bolt://a:7687", "c.yaml", true},
+		"=value forms":    {[]string{testProgramName, "--neo4j-uri=bolt://a:7687", "--config-file=c.yaml", "--validate-config=true"}, "bolt://a:7687", "c.yaml", true},
+		"=false":          {[]string{testProgramName, "--neo4j-uri=bolt://a:7687", "--validate-config=false"}, "bolt://a:7687", "", false},
+		"none":            {[]string{testProgramName}, "", "", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			flag.CommandLine = flag.NewFlagSet(testProgramName, flag.ContinueOnError)
+			os.Args = tc.args
+
+			overrides := ParseConfigFlags()
+
+			if got := overrides["URI"]; got != tc.wantURI {
+				t.Errorf("URI = %q, want %q", got, tc.wantURI)
+			}
+			if got := overrides["ConfigFile"]; got != tc.wantFile {
+				t.Errorf("ConfigFile = %q, want %q", got, tc.wantFile)
+			}
+			if got := overrides[ValidateConfigKey] == "true"; got != tc.wantValidate {
+				t.Errorf("validate-config = %v, want %v", got, tc.wantValidate)
 			}
 		})
 	}
