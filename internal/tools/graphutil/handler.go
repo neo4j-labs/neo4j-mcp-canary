@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/database"
@@ -93,6 +94,9 @@ func NewHandler[T any](deps *tools.ToolDependencies, toolName string, build func
 		}
 
 		var args T
+		if err := checkArguments(toolName, request, reflect.TypeOf(args)); err != nil {
+			return mcpsdk.NewToolResultError(err.Error()), nil
+		}
 		if err := request.BindArguments(&args); err != nil {
 			slog.Error("error binding arguments", "tool", toolName, "error", err)
 			return mcpsdk.NewToolResultError(fmt.Sprintf("%s: invalid arguments: %v. Check the argument names and types against the tool's input schema.", toolName, err)), nil

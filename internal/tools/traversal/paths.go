@@ -37,7 +37,7 @@ type FindShortestPathInput struct {
 func FindShortestPathSpec() mcpsdk.Tool {
 	return mcpsdk.NewTool("find-shortest-path",
 		mcpsdk.WithDescription(fmt.Sprintf(`
-		Find the shortest route between two nodes and return it as {length, nodes, relationships}. Read-only.
+		Find the shortest route between two nodes and return it as {length, nodes, relationships}. Read-only. Nodes carry only id and labels; pass nodeProperties (e.g. ["name"]) to include the properties you need to read.
 		Returns one shortest path by default; set allShortest=true to return every path of that same minimum length (alternatives). If no row comes back, there is no connection within maxDepth (default %d, max %d) — try direction BOTH, a larger maxDepth, or more relationship types.
 		To enumerate longer alternative routes use find-all-paths; to see everything reachable from one node use traverse.`, shortestDefaultDepth, shortestMaxDepth)),
 		mcpsdk.WithObject("from", mcpsdk.Required(), mcpsdk.Description("The start node. "+graphutil.NodeRefDoc)),
@@ -123,7 +123,7 @@ type FindAllPathsInput struct {
 func FindAllPathsSpec() mcpsdk.Tool {
 	return mcpsdk.NewTool("find-all-paths",
 		mcpsdk.WithDescription(fmt.Sprintf(`
-		Enumerate the distinct routes between two nodes, shortest first, each as {length, nodes, relationships}. Read-only.
+		Enumerate the distinct routes between two nodes, shortest first, each as {length, nodes, relationships}. Read-only. Nodes carry only id and labels; pass nodeProperties (e.g. ["name"]) to include the properties you need to read.
 		The number of routes grows very quickly with depth, so this is bounded: maxDepth defaults to %d (max %d) and at most %d paths are returned (default %d). Start with a small maxDepth and name relationshipTypes. If you only need the quickest connection use find-shortest-path instead.`, allPathsDefaultDepth, allPathsMaxDepth, allPathsMaxLimit, allPathsDefaultLimit)),
 		mcpsdk.WithObject("from", mcpsdk.Required(), mcpsdk.Description("The start node. "+graphutil.NodeRefDoc)),
 		mcpsdk.WithObject("to", mcpsdk.Required(), mcpsdk.Description("The end node. "+graphutil.NodeRefDoc)),

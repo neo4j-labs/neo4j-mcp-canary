@@ -88,7 +88,7 @@ func buildUpdateRelationship(in *UpdateRelationshipInput) (graphutil.Query, erro
 	}
 	return graphutil.Query{
 		Cypher: guardedMutation(match, "r", strings.Join(steps, "\n  "),
-			"collect("+graphutil.RelMap("r", nil)+")", "updated", refusalMessage("relationship", maxAffected), maxAffected, b),
+			"collect("+graphutil.RelMap("r", nil)+")", "updated", "relationship", maxAffected, b),
 		Params:    b.Params(),
 		Write:     true,
 		ErrorHint: "Property values must be strings, numbers, booleans or arrays of those",

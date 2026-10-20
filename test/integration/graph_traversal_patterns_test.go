@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/mcpsdk"
+	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/graph"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/patterns"
 	"github.com/neo4j-labs/neo4j-mcp-canary/internal/tools/traversal"
 	"github.com/neo4j-labs/neo4j-mcp-canary/test/integration/helpers"
@@ -197,4 +198,34 @@ func TestGraphTools_TraversalAndPatterns(t *testing.T) {
 			t.Fatalf("expected truncation at maxNodes, got %v", rows[0])
 		}
 	})
+}
+
+func TestFindSubgraph_StartWithNoRelationshipsReturnsTheNode(t *testing.T) {
+	t.Parallel()
+	tc := helpers.NewTestContext(t, dbs.GetDriver())
+	label := tc.GetUniqueLabel("Island").String()
+
+	create := graph.CreateNodeHandler(tc.Deps)
+	tc.CallTool(create, map[string]any{"labels": []any{label}, "properties": map[string]any{"name": "alone"}})
+	tc.CallTool(create, map[string]any{"labels": []any{label}, "properties": map[string]any{"name": "other"}})
+	tc.CallTool(graph.CreateRelationshipHandler(tc.Deps), map[string]any{
+		"from": map[string]any{"labels": []any{label}, "match": map[string]any{"name": "other"}},
+		"to":   map[string]any{"labels": []any{label}, "match": map[string]any{"name": "other"}},
+		"type": "UNRELATED_TYPE", "allowDuplicate": true,
+	})
+
+	for name, args := range map[string]map[string]any{
+		"isolated node": {"start": map[string]any{"labels": []any{label}, "match": map[string]any{"name": "alone"}}},
+		"only relationships of an unselected type": {"start": map[string]any{"labels": []any{label}, "match": map[string]any{"name": "other"}}, "relationshipTypes": []any{"DEPENDS_ON"}},
+	} {
+		rows := tc.ParseCypherRecords(tc.CallTool(patterns.FindSubgraphHandler(tc.Deps), args))
+		if len(rows) != 1 {
+			t.Fatalf("%s: expected one subgraph row, got %v", name, rows)
+		}
+		row := rows[0]
+		rels, _ := row["relationships"].([]any)
+		if len(row["nodes"].([]any)) != 1 || rels == nil || len(rels) != 0 || row["nodeCount"] != float64(1) || row["truncated"] != false {
+			t.Fatalf("%s: expected the start node with an empty relationships array, got %v", name, row)
+		}
+	}
 }

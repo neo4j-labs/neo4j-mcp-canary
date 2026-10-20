@@ -65,7 +65,7 @@ func buildDeleteNode(in *DeleteNodeInput) (graphutil.Query, error) {
 		del = "DETACH DELETE n"
 	}
 	return graphutil.Query{
-		Cypher:    guardedMutation(match, "n", del, "count(*)", "deleted", refusalMessage("node", maxAffected), maxAffected, b),
+		Cypher:    guardedMutation(match, "n", del, "count(*)", "deleted", "node", maxAffected, b),
 		Params:    b.Params(),
 		Write:     true,
 		ErrorHint: "If the node still has relationships, retry with detach=true to delete them too, or remove them first with delete-relationship",
