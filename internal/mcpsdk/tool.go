@@ -10,6 +10,7 @@
 package mcpsdk
 
 import (
+	"encoding/json"
 	"fmt"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -219,6 +220,15 @@ func Enum(values ...string) PropertyOption {
 // given, so an integer property's enum stays numeric in the schema.
 func EnumValues(values ...any) PropertyOption {
 	return func(b *propertyBuilder) { b.schema.Enum = values }
+}
+
+// DefaultValue advertises a property's default in the input schema.
+func DefaultValue(v any) PropertyOption {
+	return func(b *propertyBuilder) {
+		if raw, err := json.Marshal(v); err == nil {
+			b.schema.Default = raw
+		}
+	}
 }
 
 // WithString declares a "string"-typed input property.

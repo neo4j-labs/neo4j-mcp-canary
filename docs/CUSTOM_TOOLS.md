@@ -66,12 +66,29 @@ Write `statement` as a YAML block scalar (`|`): an unquoted Cypher map such as
 | `category`    | yes      | Your own label (`[a-z][a-z0-9_-]*`, at most 32 characters), usable in `NEO4J_MCP_ENABLED_TOOL_CATEGORIES` and the HTTP tool-category header. Must not be a built-in category (`cypher`, `gds`, `feedback`, `search`, `graph`, `traversal`, `patterns`). |
 | `access`      | yes      | `read` or `readwrite`. |
 | `statement`   | yes      | Cypher. Add a `CYPHER 25` prefix yourself if you need that version. |
-| `parameters`  | no       | List of `name`, `type` (`string`, `integer`, `number`, `boolean`), `description` (required), `required`, `enum`, `default`. |
+| `parameters`  | no       | List of `name`, `type` (`string`, `integer`, `number`, `boolean`), `description` (required), `required`, `enum`, `default`. A `default` is used when the caller omits the argument. |
 
 Every `$name` in the statement must be a declared parameter, and every declared
 parameter must be used; a mismatch is a startup error. An invalid definition,
 an unknown key, or a name or category that collides with a built-in stops the
 server at startup with a message naming the tool.
+
+### Required parameters with a default
+
+`required: true` means the statement must receive a value. Combined with a
+`default`, the operator supplies that value, so the model is not asked for it
+(it is left out of the tool's `required` list and the default is advertised in
+the schema) but the statement always gets one. The model may still pass its
+own value; it is checked against `type` and `enum` like any other.
+
+```yaml
+parameters:
+  - name: tenant
+    type: string
+    description: Tenant to search within
+    required: true
+    default: acme
+```
 
 ## Access and safety
 
