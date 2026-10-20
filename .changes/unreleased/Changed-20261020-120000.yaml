@@ -1,7 +1,0 @@
-kind: Changed
-body: >-
-  A custom tool parameter can now be `required: true` and also have a `default`.
-  The statement always receives a value, but the model is not told it must
-  supply one: the parameter is left out of the tool's required list and the
-  default is advertised in its schema. Previously this combination was
-  rejected.

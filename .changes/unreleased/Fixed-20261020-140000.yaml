@@ -1,8 +1,0 @@
-kind: Fixed
-body: >-
-  Custom tool validation no longer mistakes text inside a string literal,
-  quoted identifier or comment for a Cypher parameter. A statement such as
-  `RETURN '$example'` or one with `// uses $example` was rejected as
-  referencing an undeclared parameter, and a declared parameter mentioned only
-  in a comment counted as used. A statement that is only comments is now
-  reported as empty.

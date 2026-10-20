@@ -1,6 +1,0 @@
-kind: Fixed
-body: >-
-  Command-line flags now accept the standard `--name=value` form
-  (`--config-file=config.yaml`, `--neo4j-uri=bolt://localhost:7687`,
-  `--validate-config=true`) as well as `--name value`. Previously the `=` form
-  was rejected as an unknown argument.
