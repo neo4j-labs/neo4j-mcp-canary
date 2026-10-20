@@ -186,8 +186,11 @@ func validateCustomTool(t CustomTool) []error {
 	if t.Access != CustomToolAccessRead && t.Access != CustomToolAccessReadWrite {
 		add("access must be %q or %q, got %q", CustomToolAccessRead, CustomToolAccessReadWrite, t.Access)
 	}
-	if strings.TrimSpace(t.Statement) == "" {
-		add("statement is required")
+	// Parameter references are looked for in the code only: a $name inside a
+	// string literal, quoted identifier or comment is not a parameter.
+	code := cypherCode(t.Statement)
+	if strings.TrimSpace(code) == "" {
+		add("statement is required (a statement that is only comments or whitespace is empty)")
 	}
 
 	declared := map[string]bool{}
@@ -224,7 +227,7 @@ func validateCustomTool(t CustomTool) []error {
 	// A parameter the statement never uses, or a $reference with no
 	// declaration, would only surface as a runtime failure on first use.
 	referenced := map[string]bool{}
-	for _, m := range cypherParamRef.FindAllStringSubmatch(t.Statement, -1) {
+	for _, m := range cypherParamRef.FindAllStringSubmatch(code, -1) {
 		if referenced[m[1]] {
 			continue
 		}
@@ -239,6 +242,56 @@ func validateCustomTool(t CustomTool) []error {
 		}
 	}
 	return errs
+}
+
+// cypherCode returns statement with string literals, backtick-quoted
+// identifiers and comments blanked out, so what remains is only the Cypher
+// that is executed. It is a scanner, not a parser: it tracks just the
+// lexical forms that can hide a '$'. An unterminated string or block comment
+// blanks to the end of the statement, since Neo4j will reject it anyway.
+func cypherCode(statement string) string {
+	src := []rune(statement)
+	out := make([]rune, len(src))
+	for i := range src {
+		out[i] = ' '
+	}
+	for i := 0; i < len(src); {
+		c := src[i]
+		switch {
+		case c == '\'' || c == '"' || c == '`':
+			i = skipQuoted(src, i)
+		case c == '/' && i+1 < len(src) && src[i+1] == '/':
+			for i < len(src) && src[i] != '\n' {
+				i++
+			}
+		case c == '/' && i+1 < len(src) && src[i+1] == '*':
+			i += 2
+			for i < len(src) && !(src[i] == '*' && i+1 < len(src) && src[i+1] == '/') {
+				i++
+			}
+			i += 2
+		default:
+			out[i] = c
+			i++
+		}
+	}
+	return string(out)
+}
+
+// skipQuoted returns the index just past the quoted run starting at src[start]
+// (a string, or a backtick identifier). A backslash escapes the next rune in
+// strings; a doubled quote closes and reopens, which has the same effect here.
+func skipQuoted(src []rune, start int) int {
+	quote := src[start]
+	for i := start + 1; i < len(src); i++ {
+		switch {
+		case src[i] == '\\' && quote != '`':
+			i++
+		case src[i] == quote:
+			return i + 1
+		}
+	}
+	return len(src)
 }
 
 // CoerceCustomParam converts a value decoded from JSON (or YAML) to the Go

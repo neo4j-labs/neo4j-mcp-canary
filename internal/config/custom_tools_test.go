@@ -173,3 +173,58 @@ func TestUnknownFileKeys(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"neo4j_read_onyl"}, keys)
 }
+
+func TestCypherCode(t *testing.T) {
+	for name, tc := range map[string]struct{ in, wantContains, wantAbsent string }{
+		"single-quoted string":     {"RETURN '$a' AS x, $b", "$b", "$a"},
+		"double-quoted string":     {`RETURN "$a", $b`, "$b", "$a"},
+		"escaped quote in string":  {`RETURN 'it\'s $a', $b`, "$b", "$a"},
+		"doubled quote in string":  {`RETURN 'it''s $a', $b`, "$b", "$a"},
+		"backtick identifier":      {"RETURN n.`$a`, $b", "$b", "$a"},
+		"line comment":             {"RETURN $b // not $a\n", "$b", "$a"},
+		"code after line comment":  {"// $a\nRETURN $b", "$b", "$a"},
+		"block comment":            {"/* $a\n$a */ RETURN $b", "$b", "$a"},
+		"comment marker in string": {"RETURN '// $a', $b", "$b", "$a"},
+		"string marker in comment": {"// it's $a\nRETURN $b", "$b", "$a"},
+		"unterminated string":      {"RETURN $b, 'oops $a", "$b", "$a"},
+		"unterminated comment":     {"RETURN $b /* $a", "$b", "$a"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := cypherCode(tc.in)
+			assert.Contains(t, got, tc.wantContains)
+			assert.NotContains(t, got, tc.wantAbsent)
+			assert.Len(t, []rune(got), len([]rune(tc.in)))
+		})
+	}
+}
+
+func TestValidateCustomTools_ParameterReferencesIgnoreLiteralsAndComments(t *testing.T) {
+	for name, stmt := range map[string]string{
+		"string literal":       "RETURN '$example' AS x",
+		"double-quoted string": `RETURN "$example" AS x`,
+		"line comment":         "RETURN 1 // uses $example\n",
+		"block comment":        "/* $example */ RETURN 1",
+		"backtick identifier":  "MATCH (n) RETURN n.`$example`",
+	} {
+		tool := validCustomTool()
+		tool.Params = nil
+		tool.Statement = stmt
+		assert.NoError(t, ValidateCustomTools([]CustomTool{tool}), name)
+	}
+
+	tool := validCustomTool()
+	tool.Statement = "RETURN 1 // $email"
+	err := ValidateCustomTools([]CustomTool{tool})
+	require.Error(t, err, "a parameter mentioned only in a comment is not used")
+	assert.Contains(t, err.Error(), `parameter "email" is declared but never referenced`)
+
+	tool = validCustomTool()
+	tool.Statement = "// only a comment, $email"
+	err = ValidateCustomTools([]CustomTool{tool})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "statement is required")
+
+	tool = validCustomTool()
+	tool.Statement = "MATCH (c {email: $email, note: '$ignored'}) RETURN c // $also_ignored"
+	assert.NoError(t, ValidateCustomTools([]CustomTool{tool}), "a real reference still counts next to quoted ones")
+}
