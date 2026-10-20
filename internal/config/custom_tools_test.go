@@ -38,7 +38,7 @@ func TestValidateCustomTools(t *testing.T) {
 		{"missing statement", func(c *CustomTool) { c.Statement = "" }, "statement is required"},
 		{"bad param type", func(c *CustomTool) { c.Params[0].Type = "array" }, "type must be one of"},
 		{"param without description", func(c *CustomTool) { c.Params[0].Description = "" }, "description is required"},
-		{"required with default", func(c *CustomTool) { c.Params[0].Default = "x" }, "cannot have a default"},
+		{"required with default", func(c *CustomTool) { c.Params[0].Default = "x" }, ""},
 		{"default wrong type", func(c *CustomTool) { c.Params[0].Required = false; c.Params[0].Default = 5.0 }, "default"},
 		{"undeclared reference", func(c *CustomTool) { c.Statement += " LIMIT $limit" }, "$limit but no parameter"},
 		{"unused parameter", func(c *CustomTool) { c.Statement = "MATCH (c:Customer) RETURN c" }, "never referenced"},

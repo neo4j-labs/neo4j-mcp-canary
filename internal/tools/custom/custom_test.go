@@ -128,3 +128,23 @@ func TestHandler_InvalidArgumentsDoNotTouchDatabase(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, res.IsError)
 }
+
+func TestRequiredParameterWithDefault(t *testing.T) {
+	def := tool(config.CustomToolAccessRead)
+	def.Params = append(def.Params, config.CustomToolParam{
+		Name: "tenant", Type: config.CustomParamString, Description: "Tenant id", Required: true, Default: "acme",
+	})
+	def.Statement += " // $tenant"
+
+	schema := custom.Spec(def).InputSchema.(*jsonschema.Schema)
+	assert.Equal(t, []string{"tier"}, schema.Required, "a required parameter with a default is not required of the caller")
+	assert.JSONEq(t, `"acme"`, string(schema.Properties["tenant"].Default))
+
+	params, err := custom.BuildParams(def, map[string]any{"tier": "gold"})
+	require.NoError(t, err)
+	assert.Equal(t, "acme", params["tenant"], "the statement always receives the default")
+
+	params, err = custom.BuildParams(def, map[string]any{"tier": "gold", "tenant": "other"})
+	require.NoError(t, err)
+	assert.Equal(t, "other", params["tenant"], "the caller may still override it")
+}

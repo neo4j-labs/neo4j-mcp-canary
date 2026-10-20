@@ -44,7 +44,9 @@ type CustomToolParam struct {
 	Name        string `json:"name" yaml:"name"`
 	Type        string `json:"type" yaml:"type"`
 	Description string `json:"description" yaml:"description"`
-	Required    bool   `json:"required,omitempty" yaml:"required,omitempty"`
+	// Required means the statement must receive a value. With a Default
+	// the operator supplies it, so the caller may omit the argument.
+	Required bool `json:"required,omitempty" yaml:"required,omitempty"`
 	// Enum restricts the accepted values; each entry is compared after
 	// type coercion, so numbers and booleans may be listed unquoted.
 	Enum    []any `json:"enum,omitempty" yaml:"enum,omitempty"`
@@ -205,9 +207,6 @@ func validateCustomTool(t CustomTool) []error {
 		}
 		if strings.TrimSpace(p.Description) == "" {
 			add("parameters[%d] (%s): description is required", j, p.Name)
-		}
-		if p.Required && p.Default != nil {
-			add("parameters[%d] (%s): a required parameter cannot have a default", j, p.Name)
 		}
 		for _, e := range p.Enum {
 			if _, err := CoerceCustomParam(p.Type, e); err != nil {

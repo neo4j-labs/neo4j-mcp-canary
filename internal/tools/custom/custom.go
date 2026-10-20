@@ -30,8 +30,13 @@ func Spec(def config.CustomTool) mcpsdk.Tool {
 	opts := []mcpsdk.ToolOption{mcpsdk.WithDescription(def.Description)}
 	for _, p := range def.Params {
 		popts := []mcpsdk.PropertyOption{mcpsdk.Description(p.Description)}
-		if p.Required {
+		// A parameter with a default is always satisfiable, so the caller
+		// is not told it must supply it.
+		if p.Required && p.Default == nil {
 			popts = append(popts, mcpsdk.Required())
+		}
+		if p.Default != nil {
+			popts = append(popts, mcpsdk.DefaultValue(p.Default))
 		}
 		if len(p.Enum) > 0 {
 			popts = append(popts, mcpsdk.EnumValues(p.Enum...))
