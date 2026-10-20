@@ -59,7 +59,7 @@ func buildDeleteRelationship(in *DeleteRelationshipInput) (graphutil.Query, erro
 		return graphutil.Query{Cypher: dryRunQuery(match, "r"), Params: b.Params()}, nil
 	}
 	return graphutil.Query{
-		Cypher: guardedMutation(match, "r", "DELETE r", "count(*)", "deleted", refusalMessage("relationship", maxAffected), maxAffected, b),
+		Cypher: guardedMutation(match, "r", "DELETE r", "count(*)", "deleted", "relationship", maxAffected, b),
 		Params: b.Params(),
 		Write:  true,
 	}, nil

@@ -107,7 +107,7 @@ func buildUpdateNode(in *UpdateNodeInput) (graphutil.Query, error) {
 
 	return graphutil.Query{
 		Cypher: guardedMutation(match, "n", strings.Join(steps, "\n  "),
-			"collect("+graphutil.NodeMap("n", nil)+")", "updated", refusalMessage("node", maxAffected), maxAffected, b),
+			"collect("+graphutil.NodeMap("n", nil)+")", "updated", "node", maxAffected, b),
 		Params:    b.Params(),
 		Write:     true,
 		ErrorHint: "Property values must be strings, numbers, booleans or arrays of those; a uniqueness constraint may also reject the new value",
