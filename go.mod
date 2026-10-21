@@ -1,6 +1,6 @@
 module github.com/neo4j-labs/neo4j-mcp-canary
 
-go 1.26.6
+go 1.26.10
 
 require (
 	github.com/MicahParks/jwkset v0.11.3
@@ -15,6 +15,7 @@ require (
 	github.com/neo4j/neo4j-go-driver/v6 v6.2.0
 	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go v0.44.0
+	github.com/tklauser/ps v0.0.4
 	github.com/toon-format/toon-go v0.0.0-20251202084852-7ca0e27c4e8c
 	go.uber.org/mock v0.6.0
 	go.yaml.in/yaml/v3 v3.0.5
@@ -63,7 +64,6 @@ require (
 	github.com/sirupsen/logrus v1.10.2 // indirect
 	github.com/tklauser/go-sysconf v0.4.0 // indirect
 	github.com/tklauser/numcpus v0.12.0 // indirect
-	github.com/tklauser/ps v0.0.4 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
