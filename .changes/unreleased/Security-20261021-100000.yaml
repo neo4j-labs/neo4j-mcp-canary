@@ -1,6 +1,0 @@
-kind: Security
-body: >-
-  Updated Go from 1.26.6 to 1.26.10, in go.mod (which the CI and release builds
-  use) and in the Dockerfile's base image, to address CVE-2026-111943 (compromised
-  intermediate certificates). Rebuild and redeploy to pick up the fix; images and
-  binaries built from earlier releases still use the older Go.
