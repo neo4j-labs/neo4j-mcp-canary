@@ -5,6 +5,8 @@ LABEL io.modelcontextprotocol.server.name="io.github.neo4j/mcp"
 
 WORKDIR /build
 
+ARG VERSION=development
+
 # Install CA certificates
 RUN apk add --no-cache ca-certificates
 
@@ -19,7 +21,7 @@ COPY . .
 
 # Build the binary
 RUN CGO_ENABLED=0 GOOS=linux go build -C cmd/neo4j-mcp -a -installsuffix cgo \
-    -o ../../neo4j-mcp -ldflags "-X 'main.Version=v0.9.2'"
+    -o ../../neo4j-mcp -ldflags "-X 'main.Version=${VERSION}'"
 
 # Runtime stage
 FROM scratch
