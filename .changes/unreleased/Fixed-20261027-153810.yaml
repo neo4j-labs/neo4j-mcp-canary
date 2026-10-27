@@ -1,0 +1,3 @@
+kind: Fixed
+body: The Docker image now reports the release version it was built from. Previously the Dockerfile hardcoded the version string, so published images identified themselves as v0.9.2 regardless of release.
+time: 2026-10-27T15:38:10.221996+01:00
